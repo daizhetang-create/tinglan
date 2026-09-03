@@ -357,6 +357,9 @@ function Invoke-Doctor {
   foreach ($path in @('AGENTS.md', 'coordination.config.json', '.agents/skills/project-coordination/SKILL.md', 'docs/coordination/PROJECT_STATUS.md')) {
     if (-not (Test-Path -LiteralPath (Join-Path $script:RepoRoot $path))) { $problems.Add("Missing $path") }
   }
+  if (-not (Test-Path -LiteralPath (Join-Path $script:RepoRoot 'node_modules\.bin\vite.cmd'))) {
+    $problems.Add('Worktree dependencies are missing. Run npm ci in this worktree.')
+  }
   foreach ($file in @(Get-ChildItem -LiteralPath (Join-Path $script:RepoRoot 'docs\coordination\tasks') -Filter '*.json' -File -ErrorAction SilentlyContinue)) {
     try { $null = Get-Content -LiteralPath $file.FullName -Raw | ConvertFrom-Json } catch { $problems.Add("Invalid task JSON: $($file.Name)") }
   }

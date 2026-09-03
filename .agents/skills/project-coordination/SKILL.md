@@ -10,6 +10,7 @@ Keep `main` as the only accepted product state. A conversation, copied folder, o
 ## Start or resume work
 
 1. Locate the repository root and run `npm run coord -- doctor`, then `npm run coord -- status`.
+   If the worktree has no `node_modules`, run `npm ci` before product checks.
 2. Read `docs/coordination/PROJECT_STATUS.md` and the assigned file in `docs/coordination/tasks/`.
 3. Work only on the task's dedicated `codex/<task-id-lowercase>` branch or worktree. If the task has no branch yet, create it from current `main`.
 4. Run `npm run coord -- claim -TaskId <ID> -Scope <scope>` before editing. Use the scope declared by the task; do not broaden it silently.

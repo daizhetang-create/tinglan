@@ -6,9 +6,7 @@
   "status": "planned",
   "scope": "ui",
   "recommendedBranch": "codex/ui-001",
-  "dependsOn": [
-    "ARCH-001"
-  ],
+  "dependsOn": [],
   "summary": "Polish the desktop and responsive experience while making every processing, empty, failure, retry, and completion state truthful.",
   "acceptanceCriteria": [
     "Recording, upload, transcript, notes, search, export, and course flows are usable at desktop and tablet widths.",
@@ -21,4 +19,3 @@
   "evidence": [],
   "updatedAt": "2026-09-03T00:00:00+08:00"
 }
-
