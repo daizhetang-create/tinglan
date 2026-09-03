@@ -1,0 +1,27 @@
+{
+  "schemaVersion": 1,
+  "id": "QA-001",
+  "title": "Establish the 90-point release gate",
+  "priority": "P1",
+  "status": "planned",
+  "scope": "qa",
+  "recommendedBranch": "codex/qa-001",
+  "dependsOn": [
+    "CORE-001",
+    "AI-001",
+    "COURSE-001",
+    "UI-001"
+  ],
+  "summary": "Add unit, integration, E2E, real-audio, recovery, browser, and long-lecture performance evidence required for a 90/100 release.",
+  "acceptanceCriteria": [
+    "Real Mandarin, English, and mixed-language fixtures are versioned or reproducibly generated.",
+    "Critical recording-to-notes paths run in automated browser tests.",
+    "A 60-minute and a 120-minute workload complete within documented memory and time limits.",
+    "Backup and restore are verified against representative data.",
+    "Main cannot integrate a task when any required gate fails.",
+    "A release checklist records exact versions, environment, SHA, and evidence."
+  ],
+  "evidence": [],
+  "updatedAt": "2026-09-03T00:00:00+08:00"
+}
+

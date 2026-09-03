@@ -1,0 +1,25 @@
+{
+  "schemaVersion": 1,
+  "id": "COURSE-001",
+  "title": "Build durable multi-audio course workflows",
+  "priority": "P1",
+  "status": "planned",
+  "scope": "storage",
+  "recommendedBranch": "codex/course-001",
+  "dependsOn": [
+    "ARCH-001",
+    "CORE-001"
+  ],
+  "summary": "Support multiple recordings per class and course with persistent jobs, retry, resume, merged timeline, and course-level notes.",
+  "acceptanceCriteria": [
+    "Multiple audio files can be appended to one class without losing source identity.",
+    "Jobs survive reload and can resume or retry per file.",
+    "Course-level summaries preserve recording and timestamp citations.",
+    "A complete backup restores courses, metadata, transcripts, notes, and audio.",
+    "Database migration is tested against the current schema.",
+    "npm run check and npm run build pass."
+  ],
+  "evidence": [],
+  "updatedAt": "2026-09-03T00:00:00+08:00"
+}
+

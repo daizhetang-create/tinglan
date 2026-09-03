@@ -1,0 +1,21 @@
+{
+  "schemaVersion": 1,
+  "integrationOwner": "integration-chat",
+  "rules": {
+    "oneTaskPerBranch": true,
+    "oneBranchPerWorktree": true,
+    "dirtyTreeAutoSync": false,
+    "mainDirectEdits": false,
+    "readyRefPrefix": "refs/codex/ready/"
+  },
+  "scopes": {
+    "runtime": "Audio decoding, transcription and translation workers",
+    "notes": "Key messages, summaries and cited note structures",
+    "ui": "Presentational components, styles and accessibility",
+    "storage": "Persistence, migration, backup and recovery",
+    "bridge": "Local backend and Codex App Server integration",
+    "qa": "Automated tests, fixtures and performance evidence",
+    "integration": "Shared contracts, App shell, dependencies, configuration and main"
+  }
+}
+

@@ -1,0 +1,7 @@
+interface:
+  display_name: "Project Coordination"
+  short_description: "Coordinate parallel Tinglan branches and worktrees safely"
+  default_prompt: "Use $project-coordination to claim this task, sync the latest baseline, and publish a verified handoff."
+
+policy:
+  allow_implicit_invocation: true

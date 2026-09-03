@@ -1,0 +1,21 @@
+{
+  "schemaVersion": 1,
+  "id": "ARCH-001",
+  "title": "Split the application into conflict-safe feature modules",
+  "priority": "P0",
+  "status": "planned",
+  "scope": "integration",
+  "recommendedBranch": "codex/arch-001",
+  "dependsOn": [],
+  "summary": "Extract recorder, transcript, notes, storage, and assistant boundaries from the App.tsx monolith without changing user behavior.",
+  "acceptanceCriteria": [
+    "Recorder, transcript, notes, assistant, and course workflows have explicit module boundaries.",
+    "UI and runtime work no longer require routine edits to the same orchestration file.",
+    "Existing IndexedDB data remains readable.",
+    "Existing recording and playback behavior passes regression checks.",
+    "npm run check and npm run build pass."
+  ],
+  "evidence": [],
+  "updatedAt": "2026-09-03T00:00:00+08:00"
+}
+

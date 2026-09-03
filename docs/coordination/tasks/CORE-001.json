@@ -1,0 +1,22 @@
+{
+  "schemaVersion": 1,
+  "id": "CORE-001",
+  "title": "Restore reliable Chinese and English transcription",
+  "priority": "P0",
+  "status": "planned",
+  "scope": "runtime",
+  "recommendedBranch": "codex/core-001",
+  "dependsOn": [],
+  "summary": "Replace the broken ONNX q8 path with a verified runtime and add explicit fallbacks, diagnostics, and real-audio smoke tests.",
+  "acceptanceCriteria": [
+    "A real Mandarin fixture produces timestamped non-empty transcript segments.",
+    "A real English fixture produces timestamped English transcript segments.",
+    "English-to-Chinese translation produces non-empty Chinese text or a truthful recoverable error.",
+    "The known Missing required scale error is covered by a runtime compatibility test or eliminated by the selected architecture.",
+    "Model download, cache failure, offline state, and retry have user-readable states.",
+    "npm run check and npm run build pass."
+  ],
+  "evidence": [],
+  "updatedAt": "2026-09-03T00:00:00+08:00"
+}
+

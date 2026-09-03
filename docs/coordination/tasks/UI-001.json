@@ -1,0 +1,24 @@
+{
+  "schemaVersion": 1,
+  "id": "UI-001",
+  "title": "Raise the Notta-inspired UI to product quality",
+  "priority": "P1",
+  "status": "planned",
+  "scope": "ui",
+  "recommendedBranch": "codex/ui-001",
+  "dependsOn": [
+    "ARCH-001"
+  ],
+  "summary": "Polish the desktop and responsive experience while making every processing, empty, failure, retry, and completion state truthful.",
+  "acceptanceCriteria": [
+    "Recording, upload, transcript, notes, search, export, and course flows are usable at desktop and tablet widths.",
+    "No control reports success before its underlying operation succeeds.",
+    "Keyboard navigation, visible focus, labels, and contrast meet the agreed accessibility baseline.",
+    "The implementation uses original branding and assets while following the requested workflow.",
+    "Visual regression screenshots cover the dashboard, recording, transcript, AI notes, errors, and batch upload.",
+    "npm run check and npm run build pass."
+  ],
+  "evidence": [],
+  "updatedAt": "2026-09-03T00:00:00+08:00"
+}
+

@@ -1,0 +1,25 @@
+{
+  "schemaVersion": 1,
+  "id": "AI-001",
+  "title": "Connect Tinglan to Codex App Server",
+  "priority": "P1",
+  "status": "planned",
+  "scope": "bridge",
+  "recommendedBranch": "codex/ai-001",
+  "dependsOn": [
+    "ARCH-001"
+  ],
+  "summary": "Create a localhost bridge that owns Codex App Server stdio, ChatGPT-managed login, streamed turns, thread persistence, approvals, and safe transcript-to-notes prompts.",
+  "acceptanceCriteria": [
+    "The browser never receives or stores ChatGPT OAuth tokens or API keys.",
+    "The user can complete ChatGPT-managed Codex login and see account/rate-limit state.",
+    "The default notes model is gpt-5.6-luna with low reasoning and streamed output.",
+    "A transcript produces structured summary, assignments, deadlines, exam points, and timestamped citations.",
+    "Free-form questions return answers grounded only in the selected course recordings.",
+    "Offline, unauthenticated, quota-limited, cancelled, and server-restart states are recoverable and truthful.",
+    "npm run check and npm run build pass."
+  ],
+  "evidence": [],
+  "updatedAt": "2026-09-03T00:00:00+08:00"
+}
+

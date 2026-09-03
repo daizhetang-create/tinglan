@@ -1,0 +1,8 @@
+#!/bin/sh
+repo="$(git rev-parse --show-toplevel)" || exit 1
+if command -v pwsh >/dev/null 2>&1; then
+  exec pwsh -NoProfile -File "$repo/.agents/skills/project-coordination/scripts/coord.ps1" hook-pre-commit
+fi
+echo "project-coordination: pwsh is required for the pre-commit guard" >&2
+exit 1
+

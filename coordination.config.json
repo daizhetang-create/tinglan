@@ -1,0 +1,75 @@
+{
+  "schemaVersion": 1,
+  "project": "tinglan",
+  "mission": "Raise the classroom assistant from a broken prototype to a verified 90/100 product.",
+  "defaultBranch": "main",
+  "taskBranchPrefix": "codex/",
+  "leaseMinutes": 180,
+  "checks": [
+    "npm run check",
+    "npm run build"
+  ],
+  "ports": {
+    "mainDev": 4317,
+    "mainPreview": 4318,
+    "worktreeBase": 4400,
+    "worktreeSlots": 100
+  },
+  "integrationOnly": [
+    "AGENTS.md",
+    "coordination.config.json",
+    "package.json",
+    "package-lock.json",
+    "vite.config.ts",
+    "src/App.tsx",
+    "src/types.ts",
+    "src/lib/db.ts",
+    "public/sw.js",
+    "docs/coordination/PROJECT_STATUS.md",
+    "docs/coordination/OWNERSHIP.json",
+    "docs/coordination/CHANGELOG.md",
+    "docs/coordination/NEW_CHAT_HANDOFF.md",
+    "docs/architecture/**",
+    ".agents/skills/project-coordination/**",
+    ".githooks/**"
+  ],
+  "scopes": {
+    "runtime": [
+      "src/workers/**",
+      "src/lib/audio.ts",
+      "src/lib/translation.ts",
+      "tests/runtime/**"
+    ],
+    "notes": [
+      "src/lib/focusNotes.ts",
+      "src/features/notes/**",
+      "tests/notes/**"
+    ],
+    "ui": [
+      "src/components/**",
+      "src/features/ui/**",
+      "src/styles.css",
+      "src/notta-theme.css",
+      "public/icon.svg",
+      "tests/ui/**"
+    ],
+    "storage": [
+      "src/features/storage/**",
+      "tests/storage/**"
+    ],
+    "bridge": [
+      "server/**",
+      "src/features/assistant/**",
+      "tests/bridge/**"
+    ],
+    "qa": [
+      "tests/**",
+      "playwright.config.*",
+      "vitest.config.*",
+      "test-data/**"
+    ],
+    "integration": [
+      "**"
+    ]
+  }
+}

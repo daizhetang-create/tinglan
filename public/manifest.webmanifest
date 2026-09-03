@@ -1,0 +1,17 @@
+{
+  "name": "听澜 · 课堂转写助手",
+  "short_name": "听澜",
+  "description": "本地优先的课堂录音、实时转写与双语笔记工具。",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#f7f8fa",
+  "theme_color": "#3478f6",
+  "icons": [
+    {
+      "src": "/icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}
