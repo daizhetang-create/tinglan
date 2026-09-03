@@ -27,6 +27,12 @@ The claim output provides a worktree-specific dev port. Start Vite with `npm run
 
 Only an integration worktree on `main` may run `integrate`. Other tasks learn about accepted changes through `status` and synchronize at their next clean boundary.
 
+After changing the coordination protocol itself, run the isolated lifecycle test:
+
+```powershell
+pwsh -NoProfile -File .agents/skills/project-coordination/scripts/self_test.ps1
+```
+
 ## Hard safety rules
 
 - Never let two chats write the same checkout.

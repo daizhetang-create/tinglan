@@ -67,3 +67,4 @@ Only `main` may integrate. `integrate` acquires a global integration lease, merg
 - task records show integrated evidence;
 - the user-facing status matches observable product behavior.
 
+After changing the coordination machinery, run `scripts/self_test.ps1`; it must print `FORWARD_TEST_PASS`.
