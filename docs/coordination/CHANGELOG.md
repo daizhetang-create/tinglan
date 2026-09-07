@@ -22,3 +22,5 @@ This file is updated only by the integration workflow. Feature branches publish 
 - 2026-09-08 01:06 integrated COURSE-002 from 5f1de7ff9bd49479f0df664f7b916e1a51927ef2: Legacy Chinese empty targetLanguage and empty title now round-trip; 36 real IndexedDB browser checks and Node/check/build pass.
 
 - 2026-09-08 02:13 integrated RELEASE-001 from bbefd533c5b05cd60adb75540a114fcb66c12172: Verified recording-to-Codex integration, 42 real IndexedDB checks, grounded Q&A preservation, final Base quality tests, stable local launcher and shared Skill; no perfect/long-class certification.
+
+- 2026-09-08 04:56 integrated LEARN-001 from 006d45ad77a8b19363e18705d851b98c7110d9c5: Verified real image/audio study library, source-grounded DDL retrieval, local vault preservation, 15 Node and 74 browser regression checks; hosted AI and unspecified platforms remain explicit limitations

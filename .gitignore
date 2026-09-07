@@ -1,5 +1,8 @@
 node_modules/
 .runtime/
+.wrangler/
+__pycache__/
+*.pyc
 dist/
 .vite/
 *.log

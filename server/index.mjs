@@ -1,9 +1,11 @@
 import { createServer } from 'node:http';
 import { pathToFileURL } from 'node:url';
 import { BridgeError, NotesService, MODEL, publicError } from './codex.mjs';
+import { analyzeStudy, extractImage } from './study.mjs';
+import { VaultService } from './vault.mjs';
 
 const DEFAULT_PORTS = [4317, 4318, 4319, 4482, 4416];
-export function createBridge({ service = new NotesService(), port = 4319, allowedPorts = DEFAULT_PORTS } = {}) {
+export function createBridge({ service = new NotesService(), vault = new VaultService(), port = 4319, allowedPorts = DEFAULT_PORTS } = {}) {
   const ports = new Set([...allowedPorts, port]);
   const origins = new Set([...ports].flatMap(p => [`http://127.0.0.1:${p}`, `http://localhost:${p}`]));
   const hosts = new Set([...ports].flatMap(p => [`127.0.0.1:${p}`, `localhost:${p}`]));
@@ -12,22 +14,35 @@ export function createBridge({ service = new NotesService(), port = 4319, allowe
     res.setHeader('Cache-Control', 'no-store'); res.setHeader('X-Content-Type-Options', 'nosniff'); res.setHeader('Vary', 'Origin');
     if (!hosts.has(req.headers.host) || (req.headers.origin && !origins.has(req.headers.origin))) return json(403, { code: 'FORBIDDEN_ORIGIN', message: '只允许听澜本机页面访问。' });
     if (req.headers.origin) res.setHeader('Access-Control-Allow-Origin', req.headers.origin);
-    if (req.method === 'OPTIONS') { res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS'); res.setHeader('Access-Control-Allow-Headers', 'Content-Type, X-Tinglan-Client'); return res.writeHead(204).end(); }
+    if (req.method === 'OPTIONS') { res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS'); res.setHeader('Access-Control-Allow-Headers', 'Content-Type, X-Tinglan-Client, X-Tinglan-Filename'); return res.writeHead(204).end(); }
     const path = req.url?.split('?')[0];
     if (req.method === 'GET' && path === '/api/health') return json(200, { ok: true, service: 'tinglan-codex-bridge', model: MODEL });
-    if (req.method === 'POST' && (!req.headers.origin || req.headers['x-tinglan-client'] !== '1' || !req.headers['content-type']?.startsWith('application/json'))) return json(403, { code: 'FORBIDDEN_REQUEST', message: '请求未通过本机来源校验。' });
+    if (req.method === 'POST' && (!req.headers.origin || req.headers['x-tinglan-client'] !== '1' || !req.headers['content-type']?.startsWith(path === '/api/library/upload' ? 'application/octet-stream' : 'application/json'))) return json(403, { code: 'FORBIDDEN_REQUEST', message: '请求未通过本机来源校验。' });
     try {
       if (req.method === 'GET' && path === '/api/codex/status') return json(200, await service.status());
+      if (req.method === 'GET' && path === '/api/library/status') return json(200, await vault.status());
+      if (req.method === 'POST' && path === '/api/library/upload') return json(200, await vault.upload(req));
+      if (req.method === 'POST' && path === '/api/library/finalize') {
+        let bytes = 0; const chunks = [];
+        for await (const chunk of req) { bytes += chunk.length; if (bytes > 1500000) throw new BridgeError('TOO_LARGE', '学习笔记过大，请缩小范围。', 413); chunks.push(chunk); }
+        let body; try { body = JSON.parse(Buffer.concat(chunks).toString('utf8')); } catch { throw new BridgeError('BAD_INPUT', '学习笔记格式无效。', 400); }
+        return json(200, await vault.finalize(body));
+      }
       if (req.method === 'POST' && path === '/api/codex/login') return json(200, await service.login());
-      if (req.method === 'POST' && path === '/api/codex/notes') {
+      if (req.method === 'POST' && ['/api/codex/notes', '/api/study/analyze', '/api/study/image'].includes(path)) {
         let bytes = 0, chunks = [];
-        for await (const chunk of req) { bytes += chunk.length; if (bytes > 1500000) throw new BridgeError('TOO_LARGE', '提交的课堂文字过多，请减少录音数量。', 413); chunks.push(chunk); }
+        const limit = path === '/api/study/image' ? 12000000 : 1500000;
+        for await (const chunk of req) { bytes += chunk.length; if (bytes > limit) throw new BridgeError('TOO_LARGE', '提交内容超过单次上限，请减少资料数量或图片大小。', 413); chunks.push(chunk); }
         let body; try { body = JSON.parse(Buffer.concat(chunks).toString('utf8')); } catch { throw new BridgeError('BAD_INPUT', '请求不是有效的 JSON。', 400); }
         const controller = new AbortController(); res.once('close', () => { if (!res.writableEnded) controller.abort(); });
         res.writeHead(200, { 'Content-Type': 'application/x-ndjson; charset=utf-8', 'X-Accel-Buffering': 'no' });
         const emit = value => { if (!res.destroyed) res.write(JSON.stringify(value) + '\n'); };
         const heartbeat = setInterval(() => emit({ type: 'heartbeat' }), 15000);
-        try { emit({ type: 'status', message: 'Codex 正在整理课堂内容…' }); const notes = await service.generate(body, emit, controller.signal); emit({ type: 'result', notes }); }
+        try {
+          emit({ type: 'status', message: path === '/api/study/image' ? 'Codex 正在读取图片…' : 'Codex 正在核对资料…' });
+          const result = path === '/api/codex/notes' ? await service.generate(body, emit, controller.signal) : path === '/api/study/image' ? await extractImage(service, body, emit, controller.signal) : await analyzeStudy(service, body, emit, controller.signal);
+          emit(path === '/api/codex/notes' ? { type: 'result', notes: result } : { type: 'result', result });
+        }
         catch (error) { emit({ type: 'error', ...publicError(error) }); }
         finally { clearInterval(heartbeat); res.end(); }
         return;

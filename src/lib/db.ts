@@ -5,12 +5,14 @@ import {
   type RecordingMode,
   type RecordingSession,
 } from '../types';
+import { validateMaterial, type StudyMaterial } from '../features/study/types';
 
 const DB_NAME = 'tinglan-local';
-const DB_VERSION = 2;
+const DB_VERSION = 3;
 const RECORDINGS = 'recordings';
 const SETTINGS = 'settings';
 const COURSES = 'courses';
+const MATERIALS = 'materials';
 
 export const DEFAULT_COURSE_ID = 'course-unfiled';
 
@@ -107,9 +109,9 @@ function transactionDone(transaction: IDBTransaction, fallback: string): Promise
   });
 }
 
-function openDatabase(): Promise<IDBDatabase> {
+export function openDatabase(name = DB_NAME, seedDefaultCourse = true): Promise<IDBDatabase> {
   return new Promise((resolve, reject) => {
-    const request = indexedDB.open(DB_NAME, DB_VERSION);
+    const request = indexedDB.open(name, DB_VERSION);
 
     request.onupgradeneeded = (event) => {
       const db = request.result;
@@ -152,10 +154,14 @@ function openDatabase(): Promise<IDBDatabase> {
         coursesStore.createIndex('name', 'name');
       }
 
-      const migratedAt = nowIso();
-      coursesStore.put(defaultCourse(migratedAt));
+      if (!db.objectStoreNames.contains(MATERIALS)) {
+        const materials = db.createObjectStore(MATERIALS, { keyPath: 'id' });
+        materials.createIndex('courseId', 'courseId');
+        materials.createIndex('sha256', 'sha256');
+      }
 
       if (event.oldVersion < 2) {
+        if (seedDefaultCourse) coursesStore.put(defaultCourse(nowIso()));
         const cursorRequest = recordingsStore.openCursor();
         cursorRequest.onsuccess = () => {
           const cursor = cursorRequest.result;
@@ -245,7 +251,7 @@ export function deleteCourse(id: string): Promise<void> {
 async function deleteCourseNow(id: string): Promise<void> {
   if (id === DEFAULT_COURSE_ID) throw new Error('默认的“未分组”课程不能删除');
   const db = await openDatabase();
-  const transaction = db.transaction([COURSES, RECORDINGS], 'readwrite');
+  const transaction = db.transaction([COURSES, RECORDINGS, MATERIALS], 'readwrite');
   const coursesStore = transaction.objectStore(COURSES);
   const recordingsStore = transaction.objectStore(RECORDINGS);
   coursesStore.put(defaultCourse());
@@ -256,6 +262,14 @@ async function deleteCourseNow(id: string): Promise<void> {
     const cursor = cursorRequest.result;
     if (!cursor) return;
     cursor.update({ ...cursor.value, courseId: DEFAULT_COURSE_ID, updatedAt: nowIso() });
+    cursor.continue();
+  };
+
+  const materialCursor = transaction.objectStore(MATERIALS).index('courseId').openCursor(IDBKeyRange.only(id));
+  materialCursor.onsuccess = () => {
+    const cursor = materialCursor.result;
+    if (!cursor) return;
+    cursor.update({ ...cursor.value, courseId: DEFAULT_COURSE_ID, courseConfirmed: false, updatedAt: nowIso() });
     cursor.continue();
   };
 
@@ -341,7 +355,8 @@ export function clearLocalData(): Promise<void> {
 
 async function clearLocalDataNow(): Promise<void> {
   const db = await openDatabase();
-  const transaction = db.transaction([RECORDINGS, SETTINGS, COURSES], 'readwrite');
+  const transaction = db.transaction([RECORDINGS, SETTINGS, COURSES, MATERIALS], 'readwrite');
+  transaction.objectStore(MATERIALS).clear();
   transaction.objectStore(RECORDINGS).clear();
   transaction.objectStore(SETTINGS).clear();
   const coursesStore = transaction.objectStore(COURSES);
@@ -349,4 +364,28 @@ async function clearLocalDataNow(): Promise<void> {
   coursesStore.put(defaultCourse());
   await transactionDone(transaction, '清除数据失败');
   db.close();
+}
+
+export async function listMaterials(): Promise<StudyMaterial[]> {
+  const db = await openDatabase();
+  try {
+    const tx = db.transaction(MATERIALS, 'readonly');
+    const done = transactionDone(tx, '学习资料读取失败');
+    const rows = await requestResult(tx.objectStore(MATERIALS).getAll());
+    await done;
+    return (rows as StudyMaterial[]).sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
+  } finally { db.close(); }
+}
+
+export function saveMaterial(material: StudyMaterial): Promise<void> {
+  validateMaterial(material);
+  const snapshot = structuredClone(material);
+  return queueRecordingWrite(async () => {
+    const db = await openDatabase();
+    try {
+      const tx = db.transaction(MATERIALS, 'readwrite');
+      tx.objectStore(MATERIALS).put(snapshot);
+      await transactionDone(tx, '学习资料保存失败');
+    } finally { db.close(); }
+  });
 }
