@@ -1,0 +1,26 @@
+{
+  "schemaVersion": 1,
+  "id": "COURSE-002",
+  "title": "Preserve legacy Chinese empty target language and empty titles in full backups",
+  "priority": "P1",
+  "status": "active",
+  "scope": "storage",
+  "recommendedBranch": "codex/course-002",
+  "dependsOn": [
+    "COURSE-001"
+  ],
+  "summary": "Allow existing Chinese recordings/settings with an empty targetLanguage and existing empty recording titles to back up and restore without weakening English target or type validation.",
+  "acceptanceCriteria": [
+    "Chinese recordings and settings with targetLanguage empty serialize and restore through an isolated real IndexedDB test.",
+    "Restoration preserves empty targetLanguage and all existing data.",
+    "Empty recording titles allowed by the existing editor remain empty after backup and real IndexedDB restore; non-string titles remain invalid.",
+    "English mode empty targetLanguage and non-string targetLanguage remain invalid.",
+    "npm run check, npm run build and notes/backup regressions pass."
+  ],
+  "evidence": [
+    "Coordination doctor healthy; npm run check and npm run build passed; checkpoint COURSE-002 passed.",
+    "node tests/notes/rules-smoke.mjs passed, including Chinese empty targetLanguage, empty recording title, exact binary Blob round-trip, English target validation and invalid-type rejection.",
+    "Isolated real IndexedDB regression page extended to 36 checks at tests/storage/backup-smoke.html; browser verification awaited before publication."
+  ],
+  "updatedAt": "2026-09-07T16:46:05.1124870Z"
+}

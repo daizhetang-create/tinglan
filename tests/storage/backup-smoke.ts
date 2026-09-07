@@ -20,19 +20,19 @@ const bytes = new Uint8Array([0, 255, 127, 1, 2, 3, 0, 200]);
 const recording: RecordingSession = enrichWithFocusNotes({
   id: 'audio-a', title: '中文课', createdAt: at, updatedAt: at,
   durationMs: 10_000, status: 'complete', analysisStatus: 'ready', recordingMode: 'zh',
-  sourceLanguage: 'zh-CN', targetLanguage: 'zh-CN', courseId: 'math', batchId: 'class-1',
+  sourceLanguage: 'zh-CN', targetLanguage: '', courseId: 'math', batchId: 'class-1',
   segments: [{ id: 's1', startMs: 0, endMs: 5000, speaker: '讲师', source: '作業是閱讀第三章。期末考試會考這個概念。', translation: '' }],
   notes: [{ id: 'n1', atMs: 3000, text: '需要复习' }], bookmarks: [{ id: 'b1', atMs: 4000, label: '重点' }],
   keyMessages: [], audioBlob: new Blob([bytes], { type: 'audio/wav' }), audioMimeType: 'audio/wav',
 }, 'lecture', true);
-const partTwo: RecordingSession = { ...recording, id: 'audio-b', title: '第二段', createdAt: '2026-09-07T00:01:00.000Z' };
+const partTwo: RecordingSession = { ...recording, id: 'audio-b', title: '', createdAt: '2026-09-07T00:01:00.000Z' };
 const sourceBrief = recording.classBrief!;
 sourceBrief.sections.assignments[0] = { ...sourceBrief.sections.assignments[0], sourceRecordingId: 'audio-b' } as typeof sourceBrief.sections.assignments[number];
 recording.keyMessages[0] = { ...recording.keyMessages[0], sourceRecordingId: 'audio-b' } as typeof recording.keyMessages[number];
 const snapshot: LocalSnapshot = {
   recordings: [recording, partTwo],
   courses: [{ id: 'math', name: '数学', term: '秋季', color: '#123456', createdAt: at, updatedAt: at }],
-  settings: { ...DEFAULT_SETTINGS, recordingMode: 'zh', sourceLanguage: 'zh-CN', autoTranslate: false },
+  settings: { ...DEFAULT_SETTINGS, recordingMode: 'zh', sourceLanguage: 'zh-CN', targetLanguage: '', autoTranslate: false },
 };
 
 try {
@@ -43,6 +43,8 @@ try {
   assert(parsed.recordings[0].audioBlob!.type === 'audio/wav', 'Blob MIME preserved');
   assert(parsed.recordings[0].notes[0].text === '需要复习' && parsed.recordings[0].bookmarks[0].atMs === 4000, 'notes and timestamps preserved');
   assert(parsed.settings.autoTranslate === false && parsed.settings.sourceLanguage === 'zh-CN', 'settings round-trip');
+  assert(parsed.settings.targetLanguage === '' && parsed.recordings.every(item => item.targetLanguage === ''), 'legacy Chinese empty translation target round-trip');
+  assert(parsed.recordings.find(item => item.id === 'audio-b')?.title === '', 'legacy empty recording title round-trip');
   assert(recording.classBrief!.sections.assignments.length > 0 && recording.classBrief!.sections.examReading.length > 0, 'traditional Chinese multi-category classification');
   assert(recording.segments[0].source.includes('作業'), 'original traditional transcript unchanged');
   assert(!enrichWithFocusNotes({ ...recording, segments: [] }, 'standard', true).classBrief, 'no empty successful brief');
@@ -58,6 +60,8 @@ try {
   await restoreBackup(serialized, databaseName);
   const firstRead = await readLocalSnapshot(databaseName);
   assert(firstRead.recordings.length === 2 && firstRead.courses.length === 1, 'first restore uses real IndexedDB');
+  assert(firstRead.settings.targetLanguage === '' && firstRead.recordings.every(item => item.targetLanguage === ''), 'legacy Chinese empty target persists through IndexedDB');
+  assert(firstRead.recordings.find(item => item.id === 'audio-b')?.title === '', 'legacy empty title persists through IndexedDB');
   assert(JSON.stringify([...new Uint8Array(await firstRead.recordings[0].audioBlob!.arrayBuffer())]) === JSON.stringify([...bytes]), 'Blob persisted through IndexedDB');
   await restoreBackup(serialized, databaseName);
   const merged = await readLocalSnapshot(databaseName);
@@ -68,7 +72,7 @@ try {
   assert(clones[0].courseId !== 'math' && clones[0].courseId === clones[1].courseId, 'cloned course references remapped');
   assert(clones[0].batchId === clones[1].batchId && clones[0].batchId !== original.batchId, 'restored class batches isolated and grouped');
   const clonedA = clones.find((item) => item.title === '中文课')!;
-  const clonedB = clones.find((item) => item.title === '第二段')!;
+  const clonedB = clones.find((item) => item.title === '')!;
   assert((clonedA.classBrief!.sections.assignments[0] as unknown as {sourceRecordingId: string}).sourceRecordingId === clonedB.id, 'cross-recording brief citation remapped');
   assert((clonedA.keyMessages[0] as unknown as {sourceRecordingId: string}).sourceRecordingId === clonedB.id, 'cross-recording key message citation remapped');
 
@@ -84,6 +88,18 @@ try {
   const secret = JSON.parse(await serialized.text());
   secret.settings.apiKey = 'test-only-not-a-credential';
   await rejection(() => restoreBackup(new Blob([JSON.stringify(secret)]), databaseName), 'credentials not imported');
+  const badEnglishSettings = JSON.parse(await serialized.text());
+  badEnglishSettings.settings.recordingMode = 'en-zh';
+  await rejection(() => restoreBackup(new Blob([JSON.stringify(badEnglishSettings)]), databaseName), 'English settings still require a translation target');
+  const badEnglishRecording = JSON.parse(await serialized.text());
+  badEnglishRecording.recordings[0].metadata.recordingMode = 'en-zh';
+  await rejection(() => restoreBackup(new Blob([JSON.stringify(badEnglishRecording)]), databaseName), 'English recording still requires a translation target');
+  const badTargetType = JSON.parse(await serialized.text());
+  badTargetType.recordings[0].metadata.targetLanguage = null;
+  await rejection(() => restoreBackup(new Blob([JSON.stringify(badTargetType)]), databaseName), 'Chinese target must still be a string');
+  const badTitleType = JSON.parse(await serialized.text());
+  badTitleType.recordings[0].metadata.title = null;
+  await rejection(() => restoreBackup(new Blob([JSON.stringify(badTitleType)]), databaseName), 'recording title must still be a string');
   await rejection(() => restoreBackup(new Blob(['{"truncated"']), databaseName), 'truncated JSON rejected');
   const afterErrors = await readLocalSnapshot(databaseName);
   assert(afterErrors.recordings.length === 4 && afterErrors.courses.length === 2, 'failed restore leaves existing data intact');
