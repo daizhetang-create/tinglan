@@ -3392,6 +3392,9 @@ select:focus-visible {
 .connection-strip { display:flex; align-items:center; gap:10px; padding:9px 24px; background:#f5f8ff; border-bottom:1px solid #e1e6ef; color:#526175; font-size:13px; flex-wrap:wrap; }
 .connection-strip > span { width:8px; height:8px; border-radius:50%; background:#d49633; }
 .connection-strip > span.connected { background:#28a27c; }
+.app-shell .recorder-page { height:calc(100dvh - 108px); }
+.app-shell .recorder-page .processing-actions, .app-shell .notes-scope { flex:0 0 auto; }
+@media(max-width:720px) { .app-shell .recorder-page { height:auto; min-height:calc(100dvh - 110px); overflow:visible; } .app-shell .recorder-page .workspace-grid { min-height:620px; } }
 .connection-strip button { color:#2869d8; margin-left:auto; }
 .connection-strip small { color:#8b96a6; }
 .processing-actions { display:flex; align-items:center; gap:10px; flex-wrap:wrap; margin:12px 0; padding:14px; background:#fff; border:1px solid #dde3ee; border-radius:12px; }

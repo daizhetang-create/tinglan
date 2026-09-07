@@ -1218,7 +1218,7 @@ function App() {
           <h1>开始一堂新的课堂记录</h1>
           <p className="page-intro">实时转写、中文理解和 AI Notes，都在同一个工作区。</p>
         </div>
-        <div className="privacy-chip"><Icon name="lock" /> 仅存本机</div>
+        <div className="privacy-chip"><Icon name="lock" /> 音频留本机</div>
       </header>
 
       <section className="start-hero" aria-labelledby="start-title">
@@ -1657,8 +1657,6 @@ function App() {
   return (
     <div className="app-shell">
       {renderTopbar()}
-      {importRunningRef.current && <div className="processing-actions"><span>批量音频处理进行中；已导入的音频已保存在本机。</span><button className="button secondary" onClick={()=>{cancelBatchRef.current=true;finalizeAbortRef.current?.abort();analysisAbortRef.current?.abort();aiAbortRef.current?.abort();}}>取消批量处理</button></div>}
-      <div className="connection-strip" role="status"><span className={aiStatus.authenticated?'connected':'disconnected'} />{settings.aiProvider==='codex'?(aiStatus.authenticated?'Codex 已连接 · Luna · ChatGPT 订阅':'Codex 未就绪 · 录音可保存，笔记需要连接'):'本地规则模式 · 非大模型'}<button onClick={()=>{setPage('settings');void refreshCodex();}}>连接设置</button><small>恢复版 0.3</small></div>
       <aside className={`sidebar ${sidebarOpen ? 'sidebar-open' : ''}`} aria-label="应用导航" aria-hidden={!sidebarOpen} inert={!sidebarOpen}>
         <div className="drawer-brand-row">
           <button className="brand" onClick={() => { setPage('home'); setSidebarOpen(false); }} aria-label="返回首页">
@@ -1679,13 +1677,16 @@ function App() {
           <button onClick={() => { chooseImportFiles(); setSidebarOpen(false); }}><Icon name="upload" /> 批量导入</button>
         </div>
         <div className="sidebar-bottom">
-          <div className="local-card"><Icon name="lock" /><div><strong>Local first</strong><small>内容留在这台设备</small></div><span className="online-dot" /></div>
-          <p>听澜 0.2 · Focus Notes</p>
+          <div className="local-card"><Icon name="lock" /><div><strong>Local first</strong><small>音频留在本机 · 文字可送 Codex</small></div><span className="online-dot" /></div>
+          <p>听澜 0.3 · Codex Notes</p>
         </div>
       </aside>
       {sidebarOpen && <button className="sidebar-backdrop" onClick={() => setSidebarOpen(false)} aria-label="关闭导航菜单" />}
 
       <div className="content-shell">
+      {importRunningRef.current && <div className="processing-actions"><span>批量音频处理进行中；已导入的音频已保存在本机。</span><button className="button secondary" onClick={()=>{cancelBatchRef.current=true;finalizeAbortRef.current?.abort();analysisAbortRef.current?.abort();aiAbortRef.current?.abort();}}>取消批量处理</button></div>}
+      <div className="connection-strip" role="status"><span className={aiStatus.authenticated?'connected':'disconnected'} />{settings.aiProvider==='codex'?(aiStatus.authenticated?'Codex 已连接 · Luna · ChatGPT 订阅':'Codex 未就绪 · 录音可保存，笔记需要连接'):'本地规则模式 · 非大模型'}<button onClick={()=>{setPage('settings');void refreshCodex();}}>连接设置</button><small>恢复版 0.3</small></div>
+
         {!hydrated ? (
           <main id="main-content" className="loading-screen"><span className="loading-mark"><i /><i /><i /><i /></span><p>正在打开你的本地资料库…</p></main>
         ) : page === 'home' ? renderHome() : page === 'recorder' ? renderRecorder() : page === 'library' ? renderLibrary() : renderSettings()}

@@ -18,7 +18,10 @@ const web=createServer((req,res)=>{
   res.setHeader('X-Content-Type-Options','nosniff');
   res.setHeader('Referrer-Policy','no-referrer');
   if(path.startsWith('/api/')){
-    const upstream=request({hostname:'127.0.0.1',port:4319,path:req.url,method:req.method,headers:{...req.headers,host:'127.0.0.1:4319'}},response=>{res.writeHead(response.statusCode||502,response.headers);response.pipe(res);});
+    const upstream=request({hostname:'127.0.0.1',port:4319,path:req.url,method:req.method,headers:{...req.headers,host:'127.0.0.1:4319'}},response=>{
+      res.writeHead(response.statusCode||502,response.headers);
+      response.on('error',()=>res.destroy());response.on('aborted',()=>res.destroy());response.pipe(res);
+    });
     upstream.on('error',()=>{if(!res.headersSent)res.writeHead(503,{'Content-Type':'application/json'});res.end(JSON.stringify({message:'本机 Codex 服务不可用，请重新启动听澜。'}));});
     res.on('close',()=>upstream.destroy());req.pipe(upstream);return;
   }
@@ -28,7 +31,7 @@ const web=createServer((req,res)=>{
   if(!file.startsWith(dist+sep)||!existsSync(file)||!statSync(file).isFile()){res.writeHead(404,{'Content-Type':'text/plain'}).end('Not found');return;}
   const type=types[extname(file)]||'application/octet-stream';
   res.writeHead(200,{'Content-Type':type,'Content-Length':statSync(file).size,'Cache-Control':path.startsWith('/assets/')?'public, max-age=31536000, immutable':'no-cache'});
-  if(req.method==='HEAD')res.end();else createReadStream(file).pipe(res);
+  if(req.method==='HEAD')res.end();else {const stream=createReadStream(file);stream.on('error',()=>res.destroy());stream.pipe(res);}
 });
 web.headersTimeout=10000;web.requestTimeout=300000;
 web.on('error',error=>{console.error('Website: '+error.message);bridge.close();process.exitCode=1;});
