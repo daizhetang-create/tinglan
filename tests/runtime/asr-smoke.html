@@ -1,0 +1,21 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Tinglan ASR runtime smoke</title>
+    <style>
+      body { margin: 0; padding: 32px; color: #162033; background: #f4f7fb; font: 15px/1.6 system-ui, sans-serif; }
+      main { max-width: 840px; margin: auto; padding: 28px; border: 1px solid #dbe3ef; border-radius: 18px; background: white; }
+      pre { min-height: 180px; padding: 18px; overflow: auto; border-radius: 12px; color: #eaf2ff; background: #111827; white-space: pre-wrap; }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>ASR runtime smoke</h1>
+      <p id="progress">Preparing…</p>
+      <pre id="result" data-status="running"></pre>
+    </main>
+    <script type="module" src="./asr-smoke.js"></script>
+  </body>
+</html>

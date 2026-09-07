@@ -3,7 +3,7 @@
   "id": "CORE-001",
   "title": "Restore reliable Chinese and English transcription",
   "priority": "P0",
-  "status": "planned",
+  "status": "integrated",
   "scope": "runtime",
   "recommendedBranch": "codex/core-001",
   "dependsOn": [],
@@ -16,7 +16,33 @@
     "Model download, cache failure, offline state, and retry have user-readable states.",
     "npm run check and npm run build pass."
   ],
-  "evidence": [],
-  "updatedAt": "2026-09-03T00:00:00+08:00"
+  "evidence": [
+    "",
+    "> lectureflow-local@0.1.0 check",
+    "> tsc -b --pretty false",
+    "",
+    "",
+    "> lectureflow-local@0.1.0 build",
+    "> tsc -b && vite build",
+    "",
+    "vite v8.0.13 building client environment for production...",
+    "\u001b[2K",
+    "transforming...✓ 26 modules transformed.",
+    "rendering chunks...",
+    "computing gzip size...",
+    "dist/index.html                                                 0.78 kB │ gzip:     0.51 kB",
+    "dist/assets/translation.worker-DBk18nBN.js                    517.46 kB",
+    "dist/assets/transcription.worker-Bds21jf7.js                  518.74 kB",
+    "dist/assets/ort-wasm-simd-threaded.asyncify-DMmc6YqF.wasm  23,567.05 kB │ gzip: 5,824.05 kB",
+    "dist/assets/index-HkN7Hdrf.css                                108.88 kB │ gzip:    22.75 kB",
+    "dist/assets/index-Df30-NtW.js                                 282.07 kB │ gzip:    86.54 kB",
+    "",
+    "✓ built in 1.51s",
+    "npm run check: pass",
+    "npm run build: pass",
+    "2026-09-07 CUA browser: ASR zh 5 chunks; ASR en 3 chunks; real translation worker Chinese result PASS; synthetic Windows speech fixtures, not human microphone acceptance",
+    "integrated ready SHA ee1ca70f2ecd9efdbb7e0c4aa177e3325538b6f6"
+  ],
+  "updatedAt": "2026-09-07T02:23:07.1748167Z",
+  "resultSummary": "Browser WASM fp32 smoke passes for synthetic Mandarin and English PCM audio with timestamps; Xenova opus translation returns Chinese. Worker retry and timeout recovery added. App auto-analysis wiring remains FLOW-001."
 }
-

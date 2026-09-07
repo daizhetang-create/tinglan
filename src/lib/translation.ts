@@ -123,13 +123,25 @@ export class TranslationService {
         this.listener({ label: '本地翻译模型加载失败', state: 'error' });
         this.pending.forEach(({ reject }) => reject(new Error(event.message)));
         this.pending.clear();
+        this.worker?.terminate();
+        this.worker = undefined;
       };
     }
 
     const requestId = crypto.randomUUID();
     this.listener({ label: '准备本地英译中模型', state: 'checking' });
     return new Promise((resolve, reject) => {
-      this.pending.set(requestId, { resolve, reject });
+      const timer = setTimeout(() => {
+        this.worker?.terminate();
+        this.worker = undefined;
+        this.pending.delete(requestId);
+        this.listener({ label: '翻译超时，原文已保留，可重试', state: 'error' });
+        reject(new Error('翻译超时，原文已保留，可重试'));
+      }, 180_000);
+      this.pending.set(requestId, {
+        resolve: (value) => { clearTimeout(timer); resolve(value); },
+        reject: (reason) => { clearTimeout(timer); reject(reason); },
+      });
       this.worker?.postMessage({ type: 'translate', requestId, text });
     });
   }
