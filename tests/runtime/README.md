@@ -9,3 +9,13 @@ pwsh -NoProfile -File tests/runtime/generate-fixtures.ps1
 ```
 
 Acceptance smoke checks require each file to produce at least one non-empty timestamped transcript segment. The Mandarin transcript should contain recognizable classroom concepts or assignment language; the English transcript should contain `working memory`, `assignment`, or equivalent recognizable phrases.
+
+## Live streaming (LIVE-001)
+
+Start the task Vite server, then open `/tests/runtime/live-smoke.html` (English → Chinese) or `/tests/runtime/live-smoke.html?case=zh` (Mandarin) and click **Run streaming acceptance**.
+
+The test openly preflights real models before the timed portion (cold model downloads are not real-time). It sends synthetic speech at original speed through an actual `MediaStream`, `AudioWorklet`, and retained Whisper WASM worker. A separate `MediaRecorder` saves the same stream. It performs a two-second pause/resume and checks that timestamped subtitles arrive before the stream ends, queues remain bounded and drain, and the full audio blob is nonempty. The English case also requires actual local Chinese translation before the stream ends. No ASR/translation responses are mocked.
+
+This does not prove human-microphone accuracy, all-day reliability, or zero-latency captions. Whisper tiny can miss words or split sentences at chunk boundaries. The application must retain the complete recording and offer full-recording refinement/retry. Initial live subtitle latency includes the first 8–12 second chunk plus inference time; model downloads can take much longer. A full queue reports a recoverable error instead of silently growing memory.
+
+Run `node --test tests/runtime/live-controller.test.mjs` for isolated queue, silence and disposal regressions. These deliberately stall a test Worker to inspect overload behavior, return no fake transcript, and are separate from actual browser inference evidence in `live-evidence.json`.

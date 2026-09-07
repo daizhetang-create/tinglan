@@ -16,3 +16,5 @@ This file is updated only by the integration workflow. Feature branches publish 
 - 2026-09-08 00:22 integrated COURSE-001 from ed525aa9fe15645b62640dddfcbd044fc12d905b: Full backup restore and class source helpers; 28 isolated browser checks pass plus Blob/notes unit regression. Release owns UI/Codex integration.
 
 - 2026-09-08 00:33 integrated AI-002 from 98f8069a391e22b599e30813cb37263eab95fb9c: Codex startup and restart hardened; 8 bridge regressions and build pass; AI-001 real subscription inference unchanged
+
+- 2026-09-08 00:56 integrated LIVE-001 from 1c4dba56c932d4d0fc8241261767b4afe5ab07b4: Verified real-time synthetic EN to Chinese and Mandarin through MediaStream/AudioWorklet/Whisper; first output12s, bounded queue, pause/resume, recording retained; 3 controller tests pass; cold download and tiny accuracy limits documented.

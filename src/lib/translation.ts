@@ -33,6 +33,8 @@ export class TranslationService {
   private worker?: Worker;
   private pending = new Map<string, { resolve: (value: string) => void; reject: (reason: Error) => void }>();
   private queue: Promise<void> = Promise.resolve();
+  private disposed = false;
+  private queuedTasks = 0;
 
   constructor(preference: TranslationPreference, listener: ProgressListener) {
     this.preference = preference;
@@ -44,10 +46,13 @@ export class TranslationService {
   }
 
   async translate(text: string): Promise<string> {
+    if (this.disposed) throw new Error('翻译服务已关闭');
     const clean = text.trim();
     if (!clean) return '';
+    if (this.queuedTasks >= 24) throw new Error('翻译队列暂时繁忙，英文原文已保留，请稍后重试');
 
-    const task = this.queue.then(() => this.performTranslation(clean));
+    this.queuedTasks += 1;
+    const task = this.queue.then(() => this.performTranslation(clean)).finally(() => { this.queuedTasks -= 1; });
     this.queue = task.then(
       () => undefined,
       () => undefined,
@@ -56,7 +61,7 @@ export class TranslationService {
   }
 
   private async performTranslation(clean: string): Promise<string> {
-
+    if (this.disposed) throw new Error('翻译服务已关闭');
     if (this.preference !== 'local') {
       const translator = await this.getBrowserTranslator();
       if (translator) {
@@ -77,6 +82,7 @@ export class TranslationService {
   }
 
   dispose(): void {
+    this.disposed = true;
     this.browserTranslator?.destroy?.();
     this.worker?.terminate();
     this.pending.forEach(({ reject }) => reject(new Error('翻译服务已关闭')));
