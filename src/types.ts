@@ -1,4 +1,4 @@
-export type AppPage = 'home' | 'recorder' | 'library' | 'settings';
+export type AppPage = 'home' | 'recorder' | 'library' | 'study' | 'settings';
 
 export type RecordingStatus = 'idle' | 'recording' | 'paused' | 'complete';
 
@@ -103,6 +103,8 @@ export interface RecordingSession {
   classBrief?: ClassBrief;
   audioBlob?: Blob;
   audioMimeType?: string;
+  vault?: { sha256: string; note: string; state: string };
+  vaultError?: string;
 }
 
 export type TranslationPreference = 'auto' | 'browser' | 'local';

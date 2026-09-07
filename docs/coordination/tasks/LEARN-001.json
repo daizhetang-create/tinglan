@@ -1,0 +1,30 @@
+{
+  "schemaVersion": 1,
+  "id": "LEARN-001",
+  "title": "Build the evidence-backed learning library and publish verified product",
+  "priority": "P0",
+  "status": "active",
+  "scope": "integration",
+  "recommendedBranch": "codex/learn-001",
+  "dependsOn": [
+    "RELEASE-001"
+  ],
+  "summary": "User expanded the active goal to image/audio intake, automatic library classification, assignment/DDL retrieval, GitHub and Cloudflare/website distribution. Integration scope explicitly includes the affected bridge, storage and new study feature; no other writer is active.",
+  "acceptanceCriteria": [
+    "Image originals are saved before real Codex visual extraction; uncertainty and failures remain visible",
+    "Materials and recordings can be searched together with source-grounded assignment requirements and DDL",
+    "Existing v2 recordings survive migration unchanged and old/new backups remain recoverable",
+    "Explicit upload can reach the existing personal study vault without arbitrary file-path access",
+    "GitHub, Cloudflare, website and unspecified other-platform requirements have verified delivery evidence or explicit unresolved blockers, never a false completion",
+    "Real end-to-end image/audio study workflow and regressions pass"
+  ],
+  "evidence": [
+    "Actual Codex image extraction, classification and cited requirements from synthetic assignment PNG; actual mixed image/TXT/WAV upload retained originals and generated 3 English/Chinese transcript segments plus Luna notes",
+    "Reopened browser view recovered processed materials and 11-second audio; actual cross-page batch cancellation stopped subsequent audio and retained retryable originals",
+    "15/15 Node bridge/study/vault tests; original 36/36 browser backup checks and new 38/38 migration/image-backup checks passed in isolated synthetic databases",
+    "Actual isolated personal-vault ingestion, hash dedupe, evidence append and preservation of manual notes verified; no unrelated personal files scanned",
+    "GitHub private repository created and Cloudflare account authenticated; platform uploads/deployment remain pending until verified separately. Other platform names unresolved, and static hosted UI cannot claim local Codex functionality",
+    "Detailed bounded evidence and outstanding conditions in docs/coordination/LEARN_ACCEPTANCE.md; no perfection or long-lecture certification"
+  ],
+  "updatedAt": "2026-09-07T20:47:00Z"
+}

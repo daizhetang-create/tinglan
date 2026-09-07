@@ -1,8 +1,10 @@
 import { DEFAULT_SETTINGS, type AppSettings, type Course, type RecordingSession } from '../../types';
 import { recoverInterruptedRecording } from './classRecords';
+import { openDatabase } from '../../lib/db';
+import { materialSourceId, validateMaterial, validateOriginal, type StudyMaterial } from '../study/types';
 
 const DATABASE_NAME = 'tinglan-local';
-const STORES = ['recordings', 'courses', 'settings'];
+const STORES = ['recordings', 'courses', 'settings', 'materials'];
 const MAX_BACKUP_BYTES = 1024 * 1024 * 1024;
 const SECRET_FIELD = /(?:token|password|secret|api.?key|authorization)/i;
 
@@ -10,6 +12,7 @@ export interface LocalSnapshot {
   recordings: RecordingSession[];
   courses: Course[];
   settings: AppSettings;
+  materials?: StudyMaterial[];
 }
 
 type JsonObject = Record<string, unknown>;
@@ -180,9 +183,20 @@ export async function serializeBackup(snapshot: LocalSnapshot): Promise<Blob> {
     recordings.push({ metadata, audio });
   }
   snapshot.courses.forEach(validateCourse);
+  const materials = [];
+  for (const material of snapshot.materials ?? []) {
+    const { originalBlob, ...metadata } = material;
+    validateMaterial(metadata);
+    await validateOriginal(material);
+    totalBytes += originalBlob.size;
+    if (totalBytes * 1.4 > MAX_BACKUP_BYTES) throw new Error('完整备份超过 1 GB，请先分批导出资料。');
+    const bytes = new Uint8Array(await originalBlob.arrayBuffer());
+    if (await sha256(bytes) !== metadata.sha256) invalid('资料原件校验失败');
+    materials.push({ metadata, original: { type: originalBlob.type, byteLength: bytes.length, sha256: metadata.sha256, base64: encodeBase64(bytes) } });
+  }
   return new Blob([JSON.stringify({
-    format: 'tinglan-backup', version: 1, databaseVersion: 2,
-    createdAt: new Date().toISOString(), recordings, courses: snapshot.courses, settings: snapshot.settings,
+    format: 'tinglan-backup', version: 2, databaseVersion: 3,
+    createdAt: new Date().toISOString(), recordings, materials, courses: snapshot.courses, settings: snapshot.settings,
   })], { type: 'application/json;charset=utf-8' });
 }
 
@@ -192,7 +206,7 @@ export async function parseBackup(file: Blob): Promise<LocalSnapshot> {
   let parsed: unknown;
   try { parsed = JSON.parse(await file.text()); } catch { invalid('不是完整JSON文件'); }
   const root = object(parsed, '格式');
-  if (root.format !== 'tinglan-backup' || root.version !== 1 || root.databaseVersion !== 2) invalid('不支持的备份版本');
+  if (root.format !== 'tinglan-backup' || !((root.version === 1 && root.databaseVersion === 2) || (root.version === 2 && root.databaseVersion === 3))) invalid('不支持的备份版本');
   date(root.createdAt, 'createdAt');
   const courses = array(root.courses, 'courses').map(validateCourse);
   uniqueIds(courses, 'courses');
@@ -219,72 +233,63 @@ export async function parseBackup(file: Blob): Promise<LocalSnapshot> {
     recordings.push({ ...metadata, audioBlob });
   }
   uniqueIds(recordings, 'recordings');
+  const materials: StudyMaterial[] = [];
+  for (const value of root.version === 2 ? array(root.materials, 'materials') : []) {
+    const entry = object(value, 'material entry');
+    const metadata = validateMaterial(entry.metadata);
+    const original = object(entry.original, 'original');
+    const encoded = string(original.base64, 'original.base64');
+    if (encoded.length % 4 || !/^[A-Za-z0-9+/]*={0,2}$/.test(encoded)) invalid('资料原件编码');
+    let decoded: string;
+    try { decoded = atob(encoded); } catch { invalid('资料原件编码'); }
+    const bytes = Uint8Array.from(decoded, c => c.charCodeAt(0));
+    if (bytes.length !== number(original.byteLength, 'original.byteLength') || await sha256(bytes) !== metadata.sha256 || original.sha256 !== metadata.sha256) invalid('资料原件校验失败');
+    const material = { ...metadata, originalBlob: new Blob([bytes], { type: string(original.type, 'original.type') }) };
+    await validateOriginal(material);
+    materials.push(material);
+  }
+  uniqueIds(materials, 'materials');
   const courseIds = new Set(courses.map((course) => course.id));
   for (const recording of recordings) {
     if (recording.courseId && recording.courseId !== 'course-unfiled' && !courseIds.has(recording.courseId)) invalid('录音引用了不存在的课程');
   }
-  return { recordings, courses, settings };
-}
-
-function openDatabase(name: string): Promise<IDBDatabase> {
-  return new Promise((resolve, reject) => {
-    const request = indexedDB.open(name, 2);
-    request.onupgradeneeded = (event) => {
-      // This module creates only a fresh database. Existing migrations belong to lib/db.ts.
-      if (event.oldVersion !== 0) { request.transaction?.abort(); return; }
-      const db = request.result;
-      const recordings = db.createObjectStore('recordings', { keyPath: 'id' });
-      recordings.createIndex('createdAt', 'createdAt');
-      recordings.createIndex('courseId', 'courseId');
-      recordings.createIndex('courseUpdatedAt', ['courseId', 'updatedAt']);
-      const courses = db.createObjectStore('courses', { keyPath: 'id' });
-      courses.createIndex('name', 'name');
-      courses.createIndex('updatedAt', 'updatedAt');
-      db.createObjectStore('settings', { keyPath: 'key' });
-    };
-    request.onsuccess = () => {
-      const db = request.result;
-      if (!STORES.every((store) => db.objectStoreNames.contains(store))) {
-        db.close(); reject(new Error('请先打开听澜完成数据库升级，再进行备份恢复。')); return;
-      }
-      db.onversionchange = () => db.close();
-      resolve(db);
-    };
-    request.onerror = () => reject(request.error ?? new Error('无法打开资料库'));
-    request.onblocked = () => reject(new Error('请关闭其他听澜窗口后重试备份恢复'));
-  });
+  for (const material of materials) if (material.courseId && material.courseId !== 'course-unfiled' && !courseIds.has(material.courseId)) invalid('资料引用了不存在的课程');
+  return { recordings, materials, courses, settings };
 }
 
 export async function readLocalSnapshot(databaseName = DATABASE_NAME): Promise<LocalSnapshot> {
-  const db = await openDatabase(databaseName);
+  const db = await openDatabase(databaseName, false);
   return new Promise((resolve, reject) => {
     const transaction = db.transaction(STORES, 'readonly');
     const recordings = transaction.objectStore('recordings').getAll();
     const courses = transaction.objectStore('courses').getAll();
     const settings = transaction.objectStore('settings').get('app');
+    const materials = transaction.objectStore('materials').getAll();
     transaction.oncomplete = () => {
       db.close();
-      resolve({ recordings: recordings.result, courses: courses.result, settings: settings.result?.value ?? DEFAULT_SETTINGS });
+      resolve({ recordings: recordings.result, materials: materials.result, courses: courses.result, settings: settings.result?.value ?? DEFAULT_SETTINGS });
     };
     transaction.onabort = transaction.onerror = () => { db.close(); reject(transaction.error ?? new Error('备份读取失败')); };
   });
 }
 
 /** Add-only restore. Existing IDs are never overwritten; references are remapped atomically. */
-export async function restoreBackup(file: Blob, databaseName = DATABASE_NAME): Promise<{ recordings: number; courses: number }> {
+export async function restoreBackup(file: Blob, databaseName = DATABASE_NAME): Promise<{ recordings: number; courses: number; materials: number }> {
   const snapshot = await parseBackup(file);
-  const db = await openDatabase(databaseName);
+  const db = await openDatabase(databaseName, false);
   return new Promise((resolve, reject) => {
     const transaction = db.transaction(STORES, 'readwrite');
     const recordingStore = transaction.objectStore('recordings');
     const courseStore = transaction.objectStore('courses');
     const settingsStore = transaction.objectStore('settings');
+    const materialStore = transaction.objectStore('materials');
+    const materialKeys = materialStore.getAllKeys();
     const recordingKeys = recordingStore.getAllKeys();
     const courseKeys = courseStore.getAllKeys();
     const previousSettings = settingsStore.get('app');
     let readCount = 0;
     const write = () => {
-      if (++readCount !== 3) return;
+      if (++readCount !== 4) return;
       try {
         const existingRecordingIds = new Set(recordingKeys.result.map(String));
         const existingCourseIds = new Set(courseKeys.result.map(String));
@@ -293,6 +298,16 @@ export async function restoreBackup(file: Blob, databaseName = DATABASE_NAME): P
         const courseMap = new Map(snapshot.courses.map((item) => [item.id,
           item.id === 'course-unfiled' || !existingCourseIds.has(item.id) ? item.id : `course-restored-${crypto.randomUUID()}`]));
         const batchMap = new Map<string, string>();
+        const existingMaterialIds = new Set(materialKeys.result.map(String));
+        for (const material of snapshot.materials ?? []) {
+          const id = existingMaterialIds.has(material.id) ? `material-restored-${crypto.randomUUID()}` : material.id;
+          const sourceMap = new Map(material.blocks.map(b => [materialSourceId(material.id, b.id), materialSourceId(id, b.id)]));
+          const restored: StudyMaterial = { ...material, id, courseId: courseMap.get(material.courseId) ?? material.courseId };
+          if (['extracting', 'analyzing'].includes(restored.state)) { restored.state = 'error'; restored.error = '上次处理未完成，原件已恢复，请重试识别。'; }
+          if (restored.analysis) restored.analysis = { ...restored.analysis, claims: restored.analysis.claims.map(c => ({ ...c, evidence: c.evidence.map(e => ({ ...e, sourceId: sourceMap.get(e.sourceId) ?? e.sourceId })) })) };
+          validateMaterial(restored);
+          materialStore.add(restored);
+        }
         for (const course of snapshot.courses) {
           if (course.id === 'course-unfiled' && existingCourseIds.has(course.id)) continue;
           courseStore.add({ ...course, id: courseMap.get(course.id) });
@@ -326,8 +341,8 @@ export async function restoreBackup(file: Blob, databaseName = DATABASE_NAME): P
         reject(error);
       }
     };
-    recordingKeys.onsuccess = courseKeys.onsuccess = previousSettings.onsuccess = write;
-    transaction.oncomplete = () => { db.close(); resolve({ recordings: snapshot.recordings.length, courses: snapshot.courses.length }); };
+    recordingKeys.onsuccess = courseKeys.onsuccess = previousSettings.onsuccess = materialKeys.onsuccess = write;
+    transaction.oncomplete = () => { db.close(); resolve({ recordings: snapshot.recordings.length, materials: snapshot.materials?.length ?? 0, courses: snapshot.courses.length }); };
     transaction.onabort = transaction.onerror = () => { db.close(); reject(transaction.error ?? new Error('恢复失败，所有改动已回滚，原资料未改变。')); };
   });
 }
@@ -342,6 +357,6 @@ export async function backupLocalData(): Promise<void> {
   window.setTimeout(() => URL.revokeObjectURL(url), 30_000);
 }
 
-export async function restoreLocalData(file: File): Promise<{ recordings: number; courses: number }> {
+export async function restoreLocalData(file: File): Promise<{ recordings: number; courses: number; materials: number }> {
   return restoreBackup(file);
 }

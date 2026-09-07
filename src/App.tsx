@@ -6,6 +6,8 @@ import { abortable } from './features/workflow/abortable';
 import { backupLocalData, restoreLocalData } from './features/storage/backup';
 import { recoverInterruptedRecording } from './features/storage/classRecords';
 import { Icon } from './components/Icon';
+import { StudyLibrary } from './features/study/StudyLibrary';
+import { syncRecordingVault } from './features/study/vault';
 import { Toggle } from './components/Toggle';
 import { chooseRecordingMimeType, getAudioDuration } from './lib/audio';
 import {
@@ -210,7 +212,12 @@ function App() {
   const [aiStream, setAiStream] = useState('');
   const [assistantAnswer, setAssistantAnswer] = useState('');
   const [summaryScope, setSummaryScope] = useState<'recording'|'class'|'course'>('recording');
-  const [jobBusy, setJobBusy] = useState(false);
+  const [processingBusy, setJobBusy] = useState(false);
+  const [studyBusy, setStudyBusy] = useState(false);
+  const studyBusyRef = useRef(false);
+  const studyCancelRef = useRef<(() => void) | null>(null);
+  const [libraryRevision, setLibraryRevision] = useState(0);
+  const jobBusy = processingBusy || studyBusy;
   const liveRef = useRef<LiveTranscriber|null>(null);
   const liveFailedRef = useRef(false);
   const recordsRef = useRef<RecordingSession[]>([]);
@@ -560,6 +567,7 @@ function App() {
   }, []);
 
   const startRecording = useCallback(async () => {
+    if (studyBusyRef.current) { setToast('请先完成或取消学习资料处理'); return; }
     if (analysisAbortRef.current || aiJobRef.current || finalizingRef.current) {setToast('请等待当前处理完成或取消后再录音');return;}
     if (!recordingSupported) {
       setToast('当前浏览器不支持录音，请使用最新版 Edge 或 Chrome');
@@ -688,6 +696,7 @@ function App() {
   }, [releaseCapture]);
 
   const openNewRecording = useCallback(() => {
+    if (studyBusyRef.current) { setToast('请先完成或取消学习资料处理'); return; }
     if(finalizingRef.current||importRunningRef.current){setToast('请等待录音收尾或批量处理结束');return;}
     if (activeRef.current?.status === 'recording' || activeRef.current?.status === 'paused') {
       setToast('请先停止当前录音');
@@ -723,6 +732,7 @@ function App() {
   }, []);
 
   const loadDemo = useCallback(() => {
+    if (studyBusyRef.current) { setToast('请先完成或取消学习资料处理'); return; }
     if(finalizingRef.current||importRunningRef.current||analysisAbortRef.current||aiJobRef.current||activeRef.current?.status==='recording'||activeRef.current?.status==='paused'){setToast('请先完成当前处理');return;}
     const session = createSession(settings, '认知心理学 · 示例课堂');
     const demoBase: RecordingSession = {
@@ -788,16 +798,21 @@ function App() {
     } finally {parentSignal?.removeEventListener('abort',abortFromParent);aiJobRef.current=false;setAiBusy(false);aiAbortRef.current=null;}
   },[persistRecording,settings.summaryTemplate]);
 
-  const analyzeRecording = useCallback(async (recording: RecordingSession, reuseTranscript=false): Promise<RecordingSession> => {
+  const analyzeRecording = useCallback(async (recording: RecordingSession, reuseTranscript=false, parentSignal?: AbortSignal): Promise<RecordingSession> => {
+    parentSignal?.throwIfAborted();
     if(analysisAbortRef.current)throw new Error('已有转写任务正在处理，请等待或取消');
     const controller=new AbortController();analysisAbortRef.current=controller;setJobBusy(true);
+    const abortFromParent = () => controller.abort();
+    parentSignal?.addEventListener('abort', abortFromParent, { once: true });
     let working:RecordingSession={...recording,analysisStatus:'transcribing',analysisError:undefined};
     const saveStage=async(patch:Partial<RecordingSession>)=>{
       const latest=activeRef.current?.id===recording.id?activeRef.current:(recordsRef.current.find(item=>item.id===recording.id)??working);
       return persistRecording({...latest,...patch});
     };
     try {
-      working=await saveStage({analysisStatus:'transcribing',analysisError:undefined,aiError:undefined});
+      const durationMs = recording.durationMs || (recording.audioBlob ? await getAudioDuration(recording.audioBlob).catch(() => 0) : 0);
+      controller.signal.throwIfAborted();
+      working=await saveStage({durationMs,analysisStatus:'transcribing',analysisError:undefined,aiError:undefined});
       controller.signal.throwIfAborted();
       const segments=reuseTranscript&&working.segments.length?working.segments:await transcribeRecording(working,settings.preciseModel,setPreciseProgress,controller.signal);
       controller.signal.throwIfAborted();
@@ -821,6 +836,12 @@ function App() {
         try {working=await generateNotes(working,working.batchId?'class':'recording',undefined,controller.signal);}
         catch(error){working={...working,aiError:error instanceof Error?error.message:'Codex 未完成'};}
       }
+      if (!working.aiError && !controller.signal.aborted) {
+        try {
+          const vault = await syncRecordingVault(working, controller.signal);
+          if (vault) working = await saveStage({ vault, vaultError: undefined });
+        } catch (error) { working = await saveStage({ vaultError: error instanceof Error ? error.message : '本机学习库归档待重试' }); }
+      }
       setPreciseProgress({label:working.aiError?'文字已保存；Codex 纪要未完成，可重试':translationError?'文字和笔记已保存；中文翻译未完成':'转写与分类笔记已保存',state:working.aiError||translationError?'error':'ready',progress:100});
       return working;
     } catch(error) {
@@ -828,7 +849,7 @@ function App() {
       await saveStage({analysisStatus:'error',analysisError:message});
       setPreciseProgress({label:message,state:'error'});
       throw new Error(message);
-    } finally {analysisAbortRef.current=null;setJobBusy(false);}
+    } finally {parentSignal?.removeEventListener('abort', abortFromParent);analysisAbortRef.current=null;setJobBusy(false);}
   },[persistRecording,settings.autoTranslate,settings.preciseModel,settings.summaryTemplate,settings.aiProvider,generateNotes]);
 
   onRecordedRef.current=async recording=>{
@@ -846,6 +867,7 @@ function App() {
   },[active?.segments.length,active?.status,settings.aiProvider,settings.autoKeyMessages,generateNotes]);
 
   const handleAudioImport = useCallback(async (files: File[]) => {
+    if (studyBusyRef.current) { setToast('请先完成或取消学习资料处理'); return; }
     const validFiles = files.filter((file) => file.type.startsWith('audio/') || /\.(mp3|m4a|wav|webm|ogg|mp4)$/i.test(file.name));
     if (!validFiles.length) {
       setToast('请选择音频文件');
@@ -908,6 +930,7 @@ function App() {
   }, [analyzeRecording, settings, jobBusy]);
 
   const runPreciseTranscription = useCallback(async () => {
+    if (studyBusyRef.current) { setToast('请先完成或取消学习资料处理'); return; }
     if(analysisAbortRef.current||aiJobRef.current||finalizingRef.current||importRunningRef.current){setToast('请等待当前处理结束');return;}
     const recording = activeRef.current;
     if (!recording?.audioBlob) {
@@ -940,6 +963,7 @@ function App() {
   }, [noteDraft, updateActive]);
 
   const regenerateBrief = useCallback(() => {
+    if (studyBusyRef.current) { setToast('请先完成或取消学习资料处理'); return; }
     if(analysisAbortRef.current||finalizingRef.current||importRunningRef.current){setToast('请等待转写结束后再整理');return;}
     const recording=activeRef.current;
     if(!recording?.segments.length){setToast('请先完成转写');return;}
@@ -974,7 +998,8 @@ function App() {
       const [records,groups,prefs]=await Promise.all([listRecordings(),listCourses(),loadSettings()]);
       setRecordings(records);recordsRef.current=records;
       setCourses(groups.filter(course=>course.id!==DEFAULT_COURSE_ID));setSettings(prefs);
-      setToast('恢复成功：'+restored.recordings+' 段录音、'+restored.courses+' 门课程；已有数据保留');
+      setLibraryRevision(value => value + 1);
+      setToast('恢复成功：'+restored.recordings+' 段录音、'+restored.materials+' 份图文、'+restored.courses+' 门课程；已有数据保留');
     }catch(error){setToast(error instanceof Error?error.message:'恢复失败，原数据未修改');}
   },[aiBusy,jobBusy]);
 
@@ -997,6 +1022,7 @@ function App() {
   }, []);
 
   const runAssistantPrompt = useCallback((suggestion?: string) => {
+    if (studyBusyRef.current) { setToast('请先完成或取消学习资料处理'); return; }
     if(analysisAbortRef.current||finalizingRef.current||importRunningRef.current){setToast('请等待转写结束后再提问');return;}
     const prompt=(suggestion??assistantPrompt).trim();
     const recording=activeRef.current;
@@ -1077,6 +1103,7 @@ function App() {
   }, [editSource, editTranslation, editingSegment, updateActive]);
 
   const removeRecording = useCallback(async (recording: RecordingSession) => {
+    if (studyBusyRef.current) { setToast('资料正在处理，请先完成或取消，再删除'); return; }
     if(finalizingRef.current||importRunningRef.current||analysisAbortRef.current||aiJobRef.current||activeRef.current?.status==='recording'||activeRef.current?.status==='paused'){setToast('请先停止录音并完成或取消当前处理，再删除资料');return;}
     if (!window.confirm(`确定删除“${recording.title}”及其本地音频吗？此操作无法撤销。`)) return;
     await deleteRecording(recording.id);
@@ -1112,6 +1139,7 @@ function App() {
   }, [courseName, courseTerm, courses.length]);
 
   const removeCourse = useCallback(async (course: Course) => {
+    if (studyBusyRef.current) { setToast('资料正在处理，请先完成或取消，再删除分组'); return; }
     if(finalizingRef.current||importRunningRef.current||analysisAbortRef.current||aiJobRef.current||activeRef.current?.status==='recording'||activeRef.current?.status==='paused'){setToast('请先停止录音并完成或取消当前处理，再删除分组');return;}
     if (!window.confirm(`删除课程分组“${course.name}”？录音会保留并移到“未分组”。`)) return;
     await deleteCourse(course.id);
@@ -1136,6 +1164,7 @@ function App() {
   }, [installPrompt]);
 
   const clearEverything = useCallback(async () => {
+    if (studyBusyRef.current) { setToast('资料正在处理，请先完成或取消，再清除'); return; }
     if(finalizingRef.current||importRunningRef.current||analysisAbortRef.current||aiJobRef.current||activeRef.current?.status==='recording'||activeRef.current?.status==='paused'){setToast('请先停止录音并完成或取消当前处理，再清除资料');return;}
     if (!window.confirm('确定删除所有录音、转写、笔记和设置吗？此操作无法撤销。')) return;
     await clearLocalData();
@@ -1145,6 +1174,7 @@ function App() {
     setActive(null);
     activeRef.current = null;
     setSettings(DEFAULT_SETTINGS);
+    setLibraryRevision(value => value + 1);
     setElapsedMs(0);
     setPage('home');
     setToast('本地数据已全部清除');
@@ -1165,13 +1195,16 @@ function App() {
       courseNameForRecording,
       ...recording.segments.flatMap((segment) => [segment.source, segment.translation]),
       ...recording.notes.map((note) => note.text),
+      recording.classBrief?.overview ?? '',
+      ...Object.values(recording.classBrief?.sections ?? {}).flatMap(items => items.map(item => item.text)),
+      ...recording.keyMessages.flatMap(item => [item.title, item.detail]),
     ]
       .join(' ')
       .toLowerCase();
     return haystack.includes(libraryQuery.trim().toLowerCase());
   });
 
-  const pageLabel = page === 'home' ? 'Home' : page === 'library' ? 'All Records' : page === 'settings' ? 'Settings' : 'Recording';
+  const pageLabel = page === 'home' ? 'Home' : page === 'library' ? 'All Records' : page === 'study' ? 'Study Library' : page === 'settings' ? 'Settings' : 'Recording';
 
   const renderTopbar = () => (
     <header className="app-topbar">
@@ -1226,6 +1259,7 @@ function App() {
           <p className="eyebrow">Dashboard</p>
           <h1>开始一堂新的课堂记录</h1>
           <p className="page-intro">实时转写、中文理解和 AI Notes，都在同一个工作区。</p>
+          <button className="text-button" onClick={() => setPage('study')}><Icon name="library" />打开学习资料库 · 图片、作业与截止时间</button>
         </div>
         <div className="privacy-chip"><Icon name="lock" /> 音频留本机</div>
       </header>
@@ -1404,11 +1438,11 @@ function App() {
         </section>
 
         <div className="processing-actions" aria-label="音频处理">
-          <span>{active.analysisError || active.aiError || (jobBusy ? '正在处理，请保留页面…' : active.segments.length ? '文字已保存，可整理纪要或继续添加本堂课音频' : '录音结束后会自动转写；旧录音请点右侧按钮')}</span>
+          <span>{active.analysisError || active.aiError || active.vaultError || (jobBusy ? '正在处理，请保留页面…' : active.vault?.state === 'ready' ? '文字与纪要已保存 · 原件和笔记已归档到本机学习库' : active.segments.length ? '文字已保存，可整理纪要或继续添加本堂课音频' : '录音结束后会自动转写；旧录音请点右侧按钮')}</span>
           {active.audioBlob && !isCapturing && <button className="button primary" disabled={jobBusy||aiBusy} onClick={()=>void runPreciseTranscription()}>{active.segments.length?'重新转写并整理':'转写并生成笔记'}</button>}
           {active.segments.length>0 && !isCapturing && <button className="button secondary" disabled={jobBusy||aiBusy} onClick={regenerateBrief}>生成 / 重试纪要</button>}
           {!isCapturing && <button className="button secondary" disabled={jobBusy||aiBusy} onClick={()=>void appendToClass()}>追加本堂课音频</button>}
-          {(jobBusy||aiBusy)&&<button className="button secondary" onClick={()=>{cancelBatchRef.current=true;finalizeAbortRef.current?.abort();analysisAbortRef.current?.abort();aiAbortRef.current?.abort();setToast('已请求取消，已保存的数据保留');}}>取消处理</button>}
+          {(jobBusy||aiBusy)&&<button className="button secondary" onClick={()=>{studyCancelRef.current?.();cancelBatchRef.current=true;finalizeAbortRef.current?.abort();analysisAbortRef.current?.abort();aiAbortRef.current?.abort();setToast('已请求取消，已保存的数据保留');}}>取消处理</button>}
         </div>
         {showTranscriptSearch && <div className="transcript-searchbar">
           <Icon name="search" />
@@ -1654,9 +1688,9 @@ function App() {
             <div className={speechRecognitionConstructor ? 'ok' : 'warn'}><Icon name={speechRecognitionConstructor ? 'check' : 'warning'} /><span><strong>本机实时转写</strong><small>Whisper · 首次需下载模型</small></span></div>
             <div className={webGpuAvailable ? 'ok' : 'neutral'}><Icon name={webGpuAvailable ? 'check' : 'warning'} /><span><strong>WebGPU</strong><small>{webGpuAvailable ? '可用' : '使用 WASM'}</small></span></div>
           </div>
-          <div className="privacy-note"><Icon name="lock" /><div><strong>关于“本地优先”</strong><p>录音、字幕和笔记默认保存在当前浏览器。Codex 模式只发送选定转写文字至 OpenAI。清除浏览器数据会丢失本机资料，请定期导出完整备份。</p></div></div>
+          <div className="privacy-note"><Icon name="lock" /><div><strong>关于“本地优先”</strong><p>录音、图片、字幕和笔记保存在当前浏览器。Codex 模式发送所选文字和待识别图片至 OpenAI，不发送原始录音。连接本机学习库后，新资料的原件与笔记会自动归档。清除浏览器数据前请导出完整备份。</p></div></div>
           <div className="setting-row"><div><strong>安装为桌面应用</strong><p>获得独立窗口和更像原生应用的使用方式。</p></div><button className="button secondary" onClick={() => void installApp()}>安装应用</button></div>
-          <div className="setting-row"><div><strong>完整备份 / 恢复</strong><p>包含录音、课程与笔记；文件未加密，请私下保管。恢复不覆盖已有资料。</p></div><button className="button secondary" disabled={jobBusy||aiBusy} onClick={()=>void backupLocalData().catch(error=>setToast(String(error)))}>导出完整备份</button><button className="button secondary" disabled={jobBusy||aiBusy} onClick={()=>backupInputRef.current?.click()}>恢复备份</button></div>
+          <div className="setting-row"><div><strong>完整备份 / 恢复</strong><p>包含录音、图片原件、课程与笔记；文件未加密，请私下保管。恢复不覆盖已有资料。</p></div><button className="button secondary" disabled={jobBusy||aiBusy} onClick={()=>void backupLocalData().catch(error=>setToast(String(error)))}>导出完整备份</button><button className="button secondary" disabled={jobBusy||aiBusy} onClick={()=>backupInputRef.current?.click()}>恢复备份</button></div>
           <div className="setting-row danger-row"><div><strong>清除所有本地数据</strong><p>永久删除录音、字幕、笔记和偏好。</p></div><button className="button danger-button" onClick={() => void clearEverything()}><Icon name="trash" /> 全部清除</button></div>
         </section>
       </div>
@@ -1679,6 +1713,7 @@ function App() {
           <button className={page === 'recorder' && mobilePane === 'notes' ? 'active' : ''} onClick={() => { setPage('recorder'); setNotesTab('brief'); setMobilePane('notes'); setSidebarOpen(false); }}><Icon name="brain" /><span>AI 课堂助手</span></button>
           <button className={page === 'library' && courseFilter === 'all' ? 'active' : ''} onClick={() => { setCourseFilter('all'); setPage('library'); setSidebarOpen(false); }}><Icon name="library" /><span>全部录音</span>{recordings.length > 0 && <b>{recordings.length}</b>}</button>
           <button className={page === 'library' && courseFilter !== 'all' ? 'active' : ''} onClick={() => { setCourseFilter(courses[0]?.id ?? 'unfiled'); setPage('library'); setSidebarOpen(false); }}><Icon name="folder" /><span>课程分组</span>{courses.length > 0 && <b>{courses.length}</b>}</button>
+          <button className={page === 'study' ? 'active' : ''} onClick={() => { setPage('study'); setSidebarOpen(false); }}><Icon name="note" /><span>学习资料库</span></button>
           <button className={page === 'settings' ? 'active' : ''} onClick={() => { setPage('settings'); setSidebarOpen(false); }}><Icon name="settings" /><span>设置</span></button>
         </nav>
         <div className="drawer-actions">
@@ -1687,18 +1722,39 @@ function App() {
         </div>
         <div className="sidebar-bottom">
           <div className="local-card"><Icon name="lock" /><div><strong>Local first</strong><small>音频留在本机 · 文字可送 Codex</small></div><span className="online-dot" /></div>
-          <p>听澜 0.3 · Codex Notes</p>
+          <p>听澜 0.4 · Study Library</p>
         </div>
       </aside>
       {sidebarOpen && <button className="sidebar-backdrop" onClick={() => setSidebarOpen(false)} aria-label="关闭导航菜单" />}
 
       <div className="content-shell">
+      {!['localhost', '127.0.0.1'].includes(window.location.hostname) && <div className="study-status" role="status"><span>在线资料界面：这里的数据保存在当前浏览器，不会自动同步本机资料。Codex AI 与个人学习库归档需要在电脑上启动完整版本；托管页面不包含你的本机 AI 服务。</span><a className="button secondary" href="http://127.0.0.1:4318/" target="_blank" rel="noreferrer">打开本机完整版</a></div>}
       {importRunningRef.current && <div className="processing-actions"><span>批量音频处理进行中；已导入的音频已保存在本机。</span><button className="button secondary" onClick={()=>{cancelBatchRef.current=true;finalizeAbortRef.current?.abort();analysisAbortRef.current?.abort();aiAbortRef.current?.abort();}}>取消批量处理</button></div>}
-      <div className="connection-strip" role="status"><span className={aiStatus.authenticated?'connected':'disconnected'} />{settings.aiProvider==='codex'?(aiStatus.authenticated?'Codex 已连接 · Luna · ChatGPT 订阅':'Codex 未就绪 · 录音可保存，笔记需要连接'):'本地规则模式 · 非大模型'}<button onClick={()=>{setPage('settings');void refreshCodex();}}>连接设置</button><small>恢复版 0.3</small></div>
+      <div className="connection-strip" role="status"><span className={aiStatus.authenticated?'connected':'disconnected'} />{settings.aiProvider==='codex'?(aiStatus.authenticated?'Codex 已连接 · Luna · ChatGPT 订阅':'Codex 未就绪 · 录音可保存，笔记需要连接'):'本地规则模式 · 非大模型'}<button onClick={()=>{setPage('settings');void refreshCodex();}}>连接设置</button><small>学习库 0.4</small></div>
 
         {!hydrated ? (
           <main id="main-content" className="loading-screen"><span className="loading-mark"><i /><i /><i /><i /></span><p>正在打开你的本地资料库…</p></main>
-        ) : page === 'home' ? renderHome() : page === 'recorder' ? renderRecorder() : page === 'library' ? renderLibrary() : renderSettings()}
+        ) : page === 'home' ? renderHome() : page === 'recorder' ? renderRecorder() : page === 'library' ? renderLibrary() : page === 'settings' ? renderSettings() : null}
+        {hydrated && <StudyLibrary visible={page === 'study'} recordings={recordings} courses={courses} revision={libraryRevision} cancelRef={studyCancelRef} disabled={jobBusy || aiBusy || !!batchProgress || active?.status === 'recording' || active?.status === 'paused'}
+          onBusy={busy => { studyBusyRef.current = busy; setStudyBusy(busy); }} onNewCourse={() => setShowCourseDialog(true)}
+          onOpenRecording={(id, atMs) => { const recording = recordsRef.current.find(r => r.id === id); if (recording) { if (atMs !== undefined) seekSource(atMs, id); else openRecording(recording); } }}
+          onStageAudio={async (files, courseId) => {
+            const batchId = makeId('batch'), saved: RecordingSession[] = [];
+            for (const file of files) {
+              const session: RecordingSession = { ...createSession(settings, file.name.replace(/\.[^.]+$/, ''), courseId), status: 'complete', analysisStatus: 'queued', batchId, sourceFileName: file.name, audioBlob: file, audioMimeType: file.type };
+              // Persist bytes before metadata probing or model loading. Cancel never discards selected audio.
+              await persistRecording(session); saved.push(session);
+            }
+            return saved;
+          }}
+          onAnalyzeAudio={async (recording, signal) => { const result = await analyzeRecording(recording, false, signal); if (result.analysisError || result.aiError) throw new Error(result.analysisError || result.aiError); }}
+          onAudioBatchEnd={async staged => {
+            for (const original of staged) {
+              const latest = recordsRef.current.find(recording => recording.id === original.id);
+              if (latest?.analysisStatus === 'queued') await persistRecording({ ...latest, analysisStatus: 'error', analysisError: '批次已停止，此音频尚未处理；原件已保存，请单独重试。' });
+            }
+          }}
+          onCancelAudio={() => { analysisAbortRef.current?.abort(); aiAbortRef.current?.abort(); }} />}
       </div>
 
       <input ref={backupInputRef} type="file" accept=".json,application/json" hidden onChange={event=>{const file=event.target.files?.[0];if(file)void restoreBackup(file);event.currentTarget.value='';}} />

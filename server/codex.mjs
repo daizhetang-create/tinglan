@@ -154,6 +154,12 @@ export class NotesService {
   }
   async generate(body, emit, signal) {
     const input = normalizeInput(body);
+    return this.runStructured({ instructions: INSTRUCTIONS, schema: NOTES_SCHEMA,
+      input: [{ type: 'text', text: JSON.stringify({ task: input.prompt || '整理这批课堂录音的要点、作业、考试安排与注意事项。', recordings: input.recordings }) }],
+      validate: (raw, threadId) => validateNotes(raw, input.sources, threadId),
+    }, emit, signal);
+  }
+  async runStructured(task, emit, signal) {
     if (this.active >= 2) throw new BridgeError('BUSY', '已有两项 Codex 任务正在处理，请稍后重试。', 429);
     this.active++;
     let threadId, turnId;
@@ -163,7 +169,7 @@ export class NotesService {
       const started = await this.rpc.request('thread/start', {
         model: MODEL, allowProviderModelFallback: false, cwd: this.rpc.cwd, runtimeWorkspaceRoots: [this.rpc.cwd],
         approvalPolicy: 'never', sandbox: 'read-only', ephemeral: true, environments: [], selectedCapabilityRoots: [],
-        baseInstructions: INSTRUCTIONS, developerInstructions: INSTRUCTIONS, config: { model_reasoning_effort: 'low', web_search: 'disabled' },
+        baseInstructions: task.instructions, developerInstructions: task.instructions, config: { model_reasoning_effort: 'low', web_search: 'disabled' },
       });
       threadId = started.thread.id;
       if (signal?.aborted) throw new BridgeError('CANCELLED', '已取消生成。', 499);
@@ -188,12 +194,12 @@ export class NotesService {
       this.rpc.on('notification', onNotification); this.rpc.on('disconnected', onDeath); this.rpc.on('toolBlocked', onTool); signal?.addEventListener('abort', onAbort, { once: true });
       const timer = setTimeout(() => stop(new BridgeError('TIMEOUT', 'Codex 处理超过 4 分钟，已停止。请减少录音数量后重试。', 504)), 240000);
       try {
-        const turn = await this.rpc.request('turn/start', { threadId, model: MODEL, effort: 'low', input: [{ type: 'text', text: JSON.stringify({ task: input.prompt || '整理这批课堂录音的要点、作业、考试安排与注意事项。', recordings: input.recordings }) }], environments: [], approvalPolicy: 'never', sandboxPolicy: { type: 'readOnly', networkAccess: false }, outputSchema: NOTES_SCHEMA });
+        const turn = await this.rpc.request('turn/start', { threadId, model: MODEL, effort: 'low', input: task.input, environments: [], approvalPolicy: 'never', sandboxPolicy: { type: 'readOnly', networkAccess: false }, outputSchema: task.schema });
         turnId = turn.turn.id;
         if (stopped) stop(stopped);
         if (signal?.aborted) onAbort();
         const raw = await done;
-        return validateNotes(raw, input.sources, threadId);
+        return task.validate(raw, threadId);
       } finally {
         clearTimeout(timer); this.rpc.off('notification', onNotification); this.rpc.off('disconnected', onDeath); this.rpc.off('toolBlocked', onTool); signal?.removeEventListener('abort', onAbort);
       }
