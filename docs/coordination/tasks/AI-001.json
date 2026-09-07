@@ -3,13 +3,13 @@
   "id": "AI-001",
   "title": "Connect Tinglan to Codex App Server",
   "priority": "P1",
-  "status": "planned",
+  "status": "active",
   "scope": "bridge",
   "recommendedBranch": "codex/ai-001",
   "dependsOn": [
     "CORE-001"
   ],
-  "summary": "Create a localhost bridge that owns Codex App Server stdio, ChatGPT-managed login, streamed turns, thread persistence, approvals, and safe transcript-to-notes prompts.",
+  "summary": "Implemented localhost Codex App Server bridge using ChatGPT-managed login, Luna low streamed notes and cited Q&A. Notes are persisted by the frontend; ephemeral Codex threads do not promise desktop-sidebar history. All tools and approvals are denied.",
   "acceptanceCriteria": [
     "The browser never receives or stores ChatGPT OAuth tokens or API keys.",
     "The user can complete ChatGPT-managed Codex login and see account/rate-limit state.",
@@ -19,6 +19,13 @@
     "Offline, unauthenticated, quota-limited, cancelled, and server-restart states are recoverable and truthful.",
     "npm run check and npm run build pass."
   ],
-  "evidence": [],
-  "updatedAt": "2026-09-03T00:00:00+08:00"
+  "evidence": [
+    "2026-09-07 UTC: node --test tests/bridge/bridge.test.mjs: 7 passed (input/citations, missing login, cancellation, process restart, tool denial, concurrency, Host/Origin/CSRF, NDJSON). These are mock/logic tests.",
+    "2026-09-07 UTC: actual Codex CLI 0.153.4 ChatGPT Pro account -> gpt-5.6-luna low returned real synthetic-classroom notes in 16.6 seconds with 166 streamed deltas; concept, 500-word assignment deadline, October20 09:00 exam, and source timestamps validated.",
+    "Real cited question answering completed and reported absent resit date instead of inventing it. Initial word-count translation ambiguity prompted explicit unit-preservation instruction.",
+    "Real adversarial transcript smoke passed: 0 tool lifecycle/request events, no credential disclosure, assignment source/timestamp correct, 500-word unit preserved.",
+    "npm run check and npm run build passed. Fresh interactive login URL completion was not re-run because the existing ChatGPT-managed login already authenticated; no logout or secret copying occurred.",
+    "Frontend final-site end-to-end integration remains RELEASE-001 responsibility. This task does not implement ASR, browser recording or UI persistence."
+  ],
+  "updatedAt": "2026-09-07T16:16:00Z"
 }
