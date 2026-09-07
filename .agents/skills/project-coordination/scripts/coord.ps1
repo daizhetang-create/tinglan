@@ -300,7 +300,7 @@ function Assert-PathsAllowed {
   foreach ($path in @($Paths)) {
     $normalized = $path.Replace('\', '/')
     if ($normalized.Equals($taskRecord, [System.StringComparison]::OrdinalIgnoreCase)) { continue }
-    if (Test-PathAllowed -Path $normalized -Patterns $integrationOnly) {
+    if ($Lease.scope -ne 'integration' -and (Test-PathAllowed -Path $normalized -Patterns $integrationOnly)) {
       throw "Path '$normalized' is integration-only. Publish a contract request instead of editing it from $($Lease.scope)."
     }
     if (-not (Test-PathAllowed -Path $normalized -Patterns $allowed)) {
@@ -457,9 +457,6 @@ function Invoke-Claim {
     if (Test-Path -LiteralPath $leasePath) { throw "Task $script:TaskKey already has a lease. Use status or break-lease after expiry." }
     foreach ($existing in @(Get-Leases)) {
       if (Test-LeaseExpired $existing) { continue }
-      if ([string]$existing.scope -eq 'integration' -or $script:Scope -eq 'integration') {
-        throw "Integration work is exclusive; active lease $($existing.taskId) must finish first."
-      }
       if ([string]$existing.scope -eq $script:Scope -or (Test-PatternsOverlap -Left $paths -Right @($existing.paths))) {
         throw "Scope/path conflict with active task $($existing.taskId) owned by $($existing.owner)."
       }

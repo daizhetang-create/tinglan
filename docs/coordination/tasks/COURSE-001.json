@@ -7,7 +7,6 @@
   "scope": "storage",
   "recommendedBranch": "codex/course-001",
   "dependsOn": [
-    "ARCH-001",
     "CORE-001"
   ],
   "summary": "Support multiple recordings per class and course with persistent jobs, retry, resume, merged timeline, and course-level notes.",
@@ -22,4 +21,3 @@
   "evidence": [],
   "updatedAt": "2026-09-03T00:00:00+08:00"
 }
-

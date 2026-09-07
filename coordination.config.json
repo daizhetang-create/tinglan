@@ -35,6 +35,7 @@
   ],
   "scopes": {
     "runtime": [
+      "src/features/recorder/**",
       "src/workers/**",
       "src/lib/audio.ts",
       "src/lib/translation.ts",
@@ -54,8 +55,10 @@
       "tests/ui/**"
     ],
     "storage": [
+      "src/lib/focusNotes.ts",
       "src/features/storage/**",
-      "tests/storage/**"
+      "tests/storage/**",
+      "tests/notes/**"
     ],
     "bridge": [
       "server/**",
@@ -69,7 +72,12 @@
       "test-data/**"
     ],
     "integration": [
-      "**"
+      "AGENTS.md", "coordination.config.json", "package.json", "package-lock.json",
+      "vite.config.ts", "src/App.tsx", "src/types.ts", "src/lib/db.ts", "src/main.tsx",
+      "src/styles.css", "src/notta-theme.css", "public/sw.js", "index.html",
+      "docs/coordination/**", "docs/architecture/**", ".agents/skills/project-coordination/**",
+      ".githooks/**", "scripts/**", "src/features/workflow/**", "tests/workflow/**",
+      "README.md", "启动听澜.cmd", ".gitignore"
     ]
   }
 }
