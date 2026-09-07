@@ -12,3 +12,5 @@ This file is updated only by the integration workflow. Feature branches publish 
 - 2026-09-07 10:23 integrated CORE-001 from ee1ca70f2ecd9efdbb7e0c4aa177e3325538b6f6: Browser WASM fp32 smoke passes for synthetic Mandarin and English PCM audio with timestamps; Xenova opus translation returns Chinese. Worker retry and timeout recovery added. App auto-analysis wiring remains FLOW-001.
 
 - 2026-09-08 00:22 integrated AI-001 from 425f60b678be8275965d5afddcc40a05d9d51642: Real ChatGPT Pro Codex Luna notes and Q&A verified; secure local NDJSON bridge, cited outputs, login status, cancellation, 7 regression tests and build pass
+
+- 2026-09-08 00:22 integrated COURSE-001 from ed525aa9fe15645b62640dddfcbd044fc12d905b: Full backup restore and class source helpers; 28 isolated browser checks pass plus Blob/notes unit regression. Release owns UI/Codex integration.
