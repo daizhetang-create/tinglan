@@ -1,0 +1,20 @@
+{
+  "schemaVersion": 1,
+  "id": "AI-002",
+  "title": "Serialize Codex startup and reject stale transports",
+  "priority": "P1",
+  "status": "active",
+  "scope": "bridge",
+  "recommendedBranch": "codex/ai-002",
+  "dependsOn": [
+    "AI-001"
+  ],
+  "summary": "Follow-up hardening for simultaneous first status and generation calls. Keep the integrated AI-001 browser contract unchanged.",
+  "acceptanceCriteria": [
+    "Concurrent first requests await one completed app-server handshake.",
+    "Old transport exit does not reject new process requests.",
+    "Bridge tests, typecheck and build pass."
+  ],
+  "evidence": ["8 bridge regression tests pass including a deterministic parallel-handshake test.", "npm run coord -- checkpoint -TaskId AI-002: typecheck and build pass.", "No frontend contract changes; real account inference evidence remains AI-001."],
+  "updatedAt": "2026-09-07T16:27:00.3321819Z"
+}

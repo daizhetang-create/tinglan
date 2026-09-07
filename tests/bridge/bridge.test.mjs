@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { request } from 'node:http';
 import { EventEmitter } from 'node:events';
 import { createBridge } from '../../server/index.mjs';
-import { normalizeInput, validateNotes, publicError, NotesService } from '../../server/codex.mjs';
+import { normalizeInput, validateNotes, publicError, NotesService, CodexRpc } from '../../server/codex.mjs';
 
 export const fixture = { recordings: [{ id: 'test-class', title: 'Synthetic classroom fixture', createdAt: '2026-09-07T08:00:00Z', segments: [
   { id: 'segment-1', startMs: 1000, source: 'Working memory is the central concept today.' },
@@ -50,6 +50,17 @@ test('cancel, runtime restart, and forbidden tools fail closed and release job s
 test('concurrent jobs are bounded', async () => {
   const service = new NotesService(new FakeRpc('normal')); service.active = 2;
   await assert.rejects(service.generate(fixture, () => {}), error => error.code === 'BUSY');
+});
+test('parallel first requests wait for initialization instead of racing handshake', async () => {
+  const rpc = new CodexRpc(); let finish, runs = 0;
+  rpc.initialize = async () => { runs++; rpc.child = { killed: false }; await new Promise(resolve => { finish = resolve; }); };
+  let firstDone = false, secondDone = false;
+  const first = rpc.start().then(() => { firstDone = true; });
+  const second = rpc.start().then(() => { secondDone = true; });
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(firstDone, false); assert.equal(secondDone, false); assert.equal(runs, 1);
+  finish(); await Promise.all([first, second]);
+  assert.equal(firstDone && secondDone, true);
 });
 test('output citation timestamps come from source, fabricated sources are rejected', () => {
   const { sources } = normalizeInput(fixture);

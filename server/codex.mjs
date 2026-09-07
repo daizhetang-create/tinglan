@@ -31,9 +31,9 @@ function resolveCodex() {
 export class CodexRpc extends EventEmitter {
   constructor() { super(); this.pending = new Map(); this.nextId = 1; this.child = null; this.starting = null; this.cwd = null; }
   async start() {
-    if (this.child && !this.child.killed) return;
     if (this.starting) return this.starting;
-    this.starting = this.initialize().finally(() => { this.starting = null; });
+    if (this.child && !this.child.killed) return;
+    this.starting = this.initialize().catch(error => { this.close(); throw error; }).finally(() => { this.starting = null; });
     return this.starting;
   }
   async initialize() {
@@ -48,7 +48,8 @@ export class CodexRpc extends EventEmitter {
     const child = spawn(resolveCodex(), args, { cwd: this.cwd, stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true, env: process.env });
     this.child = child;
     const onDeath = () => {
-      if (this.child === child) this.child = null;
+      if (this.child !== child) return;
+      this.child = null;
       for (const { reject, timer } of this.pending.values()) { clearTimeout(timer); reject(new BridgeError('SERVER_RESTARTED', 'Codex 连接已断开，请重试；录音与已保存笔记不受影响。', 503)); }
       this.pending.clear(); this.emit('disconnected');
     };
@@ -80,7 +81,11 @@ export class CodexRpc extends EventEmitter {
       this.pending.set(id, { resolve, reject, timer }); this.send({ id, method, params });
     });
   }
-  close() { this.child?.kill(); this.child = null; }
+  close() {
+    const child = this.child; this.child = null;
+    for (const { reject, timer } of this.pending.values()) { clearTimeout(timer); reject(new BridgeError('SERVER_RESTARTED', 'Codex 连接已断开，请重试。', 503)); }
+    this.pending.clear(); child?.kill(); this.emit('disconnected');
+  }
 }
 
 export const NOTES_SCHEMA = {
