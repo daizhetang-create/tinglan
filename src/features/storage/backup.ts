@@ -69,7 +69,8 @@ function validateSettings(value: unknown): AppSettings {
   oneOf(settings.summaryTemplate, ['standard', 'lecture', 'seminar'], 'settings.summaryTemplate');
   oneOf(settings.aiProvider, ['local', 'codex'], 'settings.aiProvider');
   string(settings.sourceLanguage, 'settings.sourceLanguage', false);
-  string(settings.targetLanguage, 'settings.targetLanguage', false);
+  // Chinese-only mode historically stores no translation target as an empty string.
+  string(settings.targetLanguage, 'settings.targetLanguage', settings.recordingMode === 'zh');
   return settings as unknown as AppSettings;
 }
 
@@ -84,7 +85,10 @@ function validateCourse(value: unknown): Course {
 
 function validateRecording(value: unknown): Omit<RecordingSession, 'audioBlob'> {
   const recording = object(value, 'recording');
-  for (const key of ['id', 'title', 'sourceLanguage', 'targetLanguage']) string(recording[key], `recording.${key}`, false);
+  for (const key of ['id', 'sourceLanguage']) string(recording[key], `recording.${key}`, false);
+  // The existing title editor allows an empty title; backups preserve it verbatim.
+  string(recording.title, 'recording.title');
+  string(recording.targetLanguage, 'recording.targetLanguage', recording.recordingMode === 'zh');
   for (const key of ['courseId', 'batchId', 'sourceFileName', 'analysisError', 'aiError', 'audioMimeType']) optionalString(recording[key], key);
   if (recording.summaryScope !== undefined) oneOf(recording.summaryScope, ['recording', 'class', 'course'], 'recording.summaryScope');
   date(recording.createdAt, 'recording.createdAt');
