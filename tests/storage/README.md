@@ -9,6 +9,11 @@ named `tinglan-backup-test-*` database, deleted after the run. It never opens
 restoration into an empty current-v2 schema, add-only collision recovery,
 class/course/source identity, settings, damaged input rejection, traditional
 Chinese multi-category rules and interrupted-job recovery.
+The Chinese fixture deliberately uses the legacy empty `targetLanguage` value
+in both settings and recordings; its exact preservation is checked after real
+IndexedDB restore. English-mode empty targets and non-string targets remain invalid.
+An empty recording title, allowed by the existing title editor, is also preserved
+through backup and IndexedDB restore; non-string titles remain invalid.
 
 The module does not change the application schema. Existing legacy-v1 database
 migration remains owned by `src/lib/db.ts`; the app must hydrate it before these

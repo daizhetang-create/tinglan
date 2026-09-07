@@ -18,3 +18,5 @@ This file is updated only by the integration workflow. Feature branches publish 
 - 2026-09-08 00:33 integrated AI-002 from 98f8069a391e22b599e30813cb37263eab95fb9c: Codex startup and restart hardened; 8 bridge regressions and build pass; AI-001 real subscription inference unchanged
 
 - 2026-09-08 00:56 integrated LIVE-001 from 1c4dba56c932d4d0fc8241261767b4afe5ab07b4: Verified real-time synthetic EN to Chinese and Mandarin through MediaStream/AudioWorklet/Whisper; first output12s, bounded queue, pause/resume, recording retained; 3 controller tests pass; cold download and tiny accuracy limits documented.
+
+- 2026-09-08 01:06 integrated COURSE-002 from 5f1de7ff9bd49479f0df664f7b916e1a51927ef2: Legacy Chinese empty targetLanguage and empty title now round-trip; 36 real IndexedDB browser checks and Node/check/build pass.
