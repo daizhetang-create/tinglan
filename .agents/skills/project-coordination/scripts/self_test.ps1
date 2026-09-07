@@ -81,6 +81,11 @@ if ($sourceStatus.Count -gt 0) { throw 'Source repository must be clean before f
 try {
   New-Item -ItemType Directory -Path $container | Out-Null
   $null = Invoke-Native -Command 'git' -Arguments @('clone', '--no-hardlinks', $sourceRepo, $mainWorktree) -WorkingDirectory $container -Quiet
+  # Test the current source HEAD, even when the test is launched from an integration worktree.
+  $testBranch = (Invoke-Native -Command 'git' -Arguments @('branch', '--show-current') -WorkingDirectory $mainWorktree -Quiet) -join ''
+  if ($testBranch.Trim() -ne 'main') {
+    $null = Invoke-Native -Command 'git' -Arguments @('checkout', '-b', 'main', 'HEAD') -WorkingDirectory $mainWorktree -Quiet
+  }
   $null = Invoke-Native -Command 'git' -Arguments @('config', 'user.name', 'Tinglan Coordination Test') -WorkingDirectory $mainWorktree -Quiet
   $null = Invoke-Native -Command 'git' -Arguments @('config', 'user.email', 'coord-test@localhost') -WorkingDirectory $mainWorktree -Quiet
   $null = Invoke-Native -Command 'git' -Arguments @('config', 'core.hooksPath', '.githooks') -WorkingDirectory $mainWorktree -Quiet
@@ -95,6 +100,22 @@ try {
   $null = Invoke-Coord -WorkingDirectory $coreWorktree -Arguments @('claim', '-TaskId', 'CORE-001', '-Owner', 'forward-core')
   $null = Invoke-Native -Command 'git' -Arguments @('add', '--', 'docs/coordination/tasks/CORE-001.json') -WorkingDirectory $coreWorktree -Quiet
   $null = Invoke-Native -Command 'git' -Arguments @('commit', '-m', 'test: claim CORE-001') -WorkingDirectory $coreWorktree -Quiet
+  Assert-ExpectedFailure -Label 'renew rejects invalid TTL' -Action {
+    $null = Invoke-Coord -WorkingDirectory $coreWorktree -Arguments @('renew', '-TaskId', 'CORE-001', '-TtlMinutes', '1') -Quiet
+  }
+  $testLeasePath = Join-Path $mainWorktree '.git/codex-coordination/leases/CORE-001.json'
+  $testLease = Get-Content -LiteralPath $testLeasePath -Raw | ConvertFrom-Json
+  $testLease.expiresAt = [datetimeoffset]::UtcNow.AddMinutes(-1).ToString('o')
+  [IO.File]::WriteAllText($testLeasePath,($testLease | ConvertTo-Json -Depth 12))
+  Assert-ExpectedFailure -Label 'expired renew rejects other owner' -Action {
+    $null = Invoke-Coord -WorkingDirectory $coreWorktree -Arguments @('renew', '-TaskId', 'CORE-001', '-Owner', 'someone-else', '-Reason', 'test') -Quiet
+  }
+  $null = Invoke-Coord -WorkingDirectory $qaWorktree -Arguments @('claim', '-TaskId', 'QA-001', '-Owner', 'test-conflicting-owner') -Quiet
+  Assert-ExpectedFailure -Label 'expired renew cannot resurrect overlapping active scope' -Action {
+    $null = Invoke-Coord -WorkingDirectory $coreWorktree -Arguments @('renew', '-TaskId', 'CORE-001', '-Owner', 'forward-core', '-Reason', 'test recovery') -Quiet
+  }
+  $null = Invoke-Coord -WorkingDirectory $qaWorktree -Arguments @('release', '-TaskId', 'QA-001') -Quiet
+  $null = Invoke-Coord -WorkingDirectory $coreWorktree -Arguments @('renew', '-TaskId', 'CORE-001', '-Owner', 'forward-core', '-Reason', 'test recovery')
   $null = Invoke-Coord -WorkingDirectory $coreWorktree -Arguments @('checkpoint', '-TaskId', 'CORE-001')
   $null = Invoke-Coord -WorkingDirectory $coreWorktree -Arguments @('publish', '-TaskId', 'CORE-001', '-Summary', 'Forward-test artifact; no product changes.')
 
