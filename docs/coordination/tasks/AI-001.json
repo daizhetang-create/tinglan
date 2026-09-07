@@ -7,7 +7,7 @@
   "scope": "bridge",
   "recommendedBranch": "codex/ai-001",
   "dependsOn": [
-    "ARCH-001"
+    "CORE-001"
   ],
   "summary": "Create a localhost bridge that owns Codex App Server stdio, ChatGPT-managed login, streamed turns, thread persistence, approvals, and safe transcript-to-notes prompts.",
   "acceptanceCriteria": [
@@ -22,4 +22,3 @@
   "evidence": [],
   "updatedAt": "2026-09-03T00:00:00+08:00"
 }
-

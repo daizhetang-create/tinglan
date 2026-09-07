@@ -1,0 +1,23 @@
+{
+  "schemaVersion": 1,
+  "id": "RELEASE-001",
+  "title": "Deliver the verified recording-to-Codex classroom workflow",
+  "priority": "P0",
+  "status": "active",
+  "scope": "integration",
+  "recommendedBranch": "codex/release-001",
+  "dependsOn": [
+    "CORE-001"
+  ],
+  "summary": "Wire capture, analysis, recovery, assistant UI, stable local serving, and shared handoff. User selected ChatGPT subscription and GPT-5.6 Luna.",
+  "acceptanceCriteria": [
+    "Recording stop triggers persisted transcription and notes",
+    "Live English audio produces source and Chinese text",
+    "Real Codex summary identifies assignment and exam with sources",
+    "Reload and backup preserve results",
+    "User-facing port 4318 serves verified build",
+    "Coordination lifecycle passes and shared handoff is current"
+  ],
+  "evidence": [],
+  "updatedAt": "2026-09-07T15:43:22.1332927Z"
+}
