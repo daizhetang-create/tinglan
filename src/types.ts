@@ -21,6 +21,7 @@ export interface TranscriptSegment {
 }
 
 export interface KeyMessage {
+  sourceRecordingId?: string;
   id: string;
   startMs: number;
   endMs: number;
@@ -32,6 +33,8 @@ export interface KeyMessage {
 }
 
 export interface BriefItem {
+  sourceRecordingId?: string;
+  due?: string;
   id: string;
   text: string;
   atMs: number;
@@ -49,7 +52,9 @@ export interface ClassBrief {
   };
   generatedAt: string;
   sourceSegmentCount: number;
-  engine: 'local-rules' | 'openai';
+  engine: 'local-rules' | 'openai' | 'codex';
+  model?: string;
+  threadId?: string;
   template: SummaryTemplate;
 }
 
@@ -83,6 +88,8 @@ export interface RecordingSession {
   status: RecordingStatus;
   analysisStatus: AnalysisStatus;
   analysisError?: string;
+  aiError?: string;
+  summaryScope?: 'recording' | 'class' | 'course';
   recordingMode: RecordingMode;
   sourceLanguage: string;
   targetLanguage: string;
@@ -110,7 +117,7 @@ export interface AppSettings {
   translationPreference: TranslationPreference;
   preciseModel: 'tiny' | 'base';
   summaryTemplate: SummaryTemplate;
-  aiProvider: 'local';
+  aiProvider: 'local' | 'codex';
 }
 
 export const DEFAULT_SETTINGS: AppSettings = {
@@ -123,7 +130,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   translationPreference: 'auto',
   preciseModel: 'tiny',
   summaryTemplate: 'standard',
-  aiProvider: 'local',
+  aiProvider: 'codex',
 };
 
 export interface ModelProgress {

@@ -92,7 +92,7 @@ function normalizeSettings(value?: LegacySettings): AppSettings {
           : 'zh-CN'
         : value?.sourceLanguage ?? DEFAULT_SETTINGS.sourceLanguage,
     preciseModel,
-    aiProvider: 'local',
+    aiProvider: value?.aiProvider === 'local' ? 'local' : 'codex',
   };
 }
 

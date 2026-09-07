@@ -3388,3 +3388,21 @@ select:focus-visible {
     transition-duration: 0.01ms !important;
   }
 }
+/* Functional status and recovery controls preserve the existing workspace visual language. */
+.connection-strip { display:flex; align-items:center; gap:10px; padding:9px 24px; background:#f5f8ff; border-bottom:1px solid #e1e6ef; color:#526175; font-size:13px; flex-wrap:wrap; }
+.connection-strip > span { width:8px; height:8px; border-radius:50%; background:#d49633; }
+.connection-strip > span.connected { background:#28a27c; }
+.connection-strip button { color:#2869d8; margin-left:auto; }
+.connection-strip small { color:#8b96a6; }
+.processing-actions { display:flex; align-items:center; gap:10px; flex-wrap:wrap; margin:12px 0; padding:14px; background:#fff; border:1px solid #dde3ee; border-radius:12px; }
+.processing-actions > span { flex:1 1 250px; font-size:13px; color:#576578; overflow-wrap:anywhere; }
+.processing-actions .button { font-size:13px; padding:10px 14px; min-height:40px; }
+.notes-scope { display:flex; align-items:center; justify-content:space-between; gap:12px; padding:12px 20px; border-bottom:1px solid #e5e9f1; font-size:12px; color:#687588; }
+.notes-scope select, .setting-row select { color:#2c527c; background:#f7f9fc; border:1px solid #dce3ed; padding:8px; border-radius:7px; }
+.workflow-error, .ai-stream, .assistant-answer { margin:12px 20px; padding:12px; border-radius:9px; background:#f4f2ff; overflow-wrap:anywhere; font-size:13px; line-height:1.7; }
+.workflow-error { background:#fff3ed; color:#935936; }
+.ai-stream pre { white-space:pre-wrap; font:inherit; margin:3px 0; }
+.assistant-answer p { white-space:pre-wrap; }
+.due-date { display:block; color:#8c6041; margin-top:5px; }
+.model-bar > span { white-space:normal !important; text-overflow:clip !important; overflow-wrap:anywhere; }
+@media(max-width:700px) { .connection-strip{padding:8px 14px;} .processing-actions .button{flex:1 1 auto;} .notes-scope{padding:10px;flex-wrap:wrap;} }
