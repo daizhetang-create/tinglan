@@ -3,7 +3,7 @@
   "id": "LEARN-001",
   "title": "Build the evidence-backed learning library and publish verified product",
   "priority": "P0",
-  "status": "active",
+  "status": "ready",
   "scope": "integration",
   "recommendedBranch": "codex/learn-001",
   "dependsOn": [
@@ -24,7 +24,31 @@
     "15/15 Node bridge/study/vault tests; original 36/36 browser backup checks and new 38/38 migration/image-backup checks passed in isolated synthetic databases",
     "Actual isolated personal-vault ingestion, hash dedupe, evidence append and preservation of manual notes verified; no unrelated personal files scanned",
     "GitHub private repository created and Cloudflare account authenticated; platform uploads/deployment remain pending until verified separately. Other platform names unresolved, and static hosted UI cannot claim local Codex functionality",
-    "Detailed bounded evidence and outstanding conditions in docs/coordination/LEARN_ACCEPTANCE.md; no perfection or long-lecture certification"
+    "Detailed bounded evidence and outstanding conditions in docs/coordination/LEARN_ACCEPTANCE.md; no perfection or long-lecture certification",
+    "",
+    "> lectureflow-local@0.4.0 check",
+    "> tsc -b --pretty false",
+    "",
+    "",
+    "> lectureflow-local@0.4.0 build",
+    "> tsc -b && vite build && node scripts/stamp-build.mjs",
+    "",
+    "vite v8.0.13 building client environment for production...",
+    "\u001b[2K",
+    "transforming...✓ 38 modules transformed.",
+    "rendering chunks...",
+    "computing gzip size...",
+    "dist/index.html                                                 0.78 kB │ gzip:     0.52 kB",
+    "dist/assets/translation.worker-DBk18nBN.js                    517.46 kB",
+    "dist/assets/transcription.worker-66MuyZzo.js                  518.99 kB",
+    "dist/assets/ort-wasm-simd-threaded.asyncify-DMmc6YqF.wasm  23,567.05 kB │ gzip: 5,824.05 kB",
+    "dist/assets/index-DFqd3F7L.css                                116.70 kB │ gzip:    24.42 kB",
+    "dist/assets/index-B2P_t9TQ.js                                 348.78 kB │ gzip:   108.17 kB",
+    "",
+    "✓ built in 1.57s",
+    "npm run check: pass",
+    "npm run build: pass"
   ],
-  "updatedAt": "2026-09-07T20:47:00Z"
+  "updatedAt": "2026-09-07T20:55:30.4548551Z",
+  "resultSummary": "Verified real image/audio study library, source-grounded DDL retrieval, local vault preservation, 15 Node and 74 browser regression checks; hosted AI and unspecified platforms remain explicit limitations"
 }
