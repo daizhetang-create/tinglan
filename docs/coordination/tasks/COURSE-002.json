@@ -20,7 +20,8 @@
   "evidence": [
     "Coordination doctor healthy; npm run check and npm run build passed; checkpoint COURSE-002 passed.",
     "node tests/notes/rules-smoke.mjs passed, including Chinese empty targetLanguage, empty recording title, exact binary Blob round-trip, English target validation and invalid-type rejection.",
-    "Isolated real IndexedDB regression page extended to 36 checks at tests/storage/backup-smoke.html; browser verification awaited before publication."
+    "Root CUA verified http://127.0.0.1:4524/tests/storage/backup-smoke.html: ALL 36 CHECKS PASSED, including Chinese empty targetLanguage and empty title through actual IndexedDB restore; English empty target/non-string values remain rejected. Isolated test database tinglan-backup-test-cfda43b6-c9f8-429d-92c9-6e133e2cdd22; no production data accessed.",
+    "Synchronized clean branch with main 4ff5862ee521b45091aa208a4da145b54161c3b6 before publication."
   ],
   "updatedAt": "2026-09-07T16:46:05.1124870Z"
 }
