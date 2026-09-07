@@ -3,7 +3,7 @@
   "id": "CORE-001",
   "title": "Restore reliable Chinese and English transcription",
   "priority": "P0",
-  "status": "planned",
+  "status": "active",
   "scope": "runtime",
   "recommendedBranch": "codex/core-001",
   "dependsOn": [],
@@ -17,6 +17,5 @@
     "npm run check and npm run build pass."
   ],
   "evidence": [],
-  "updatedAt": "2026-09-03T00:00:00+08:00"
+  "updatedAt": "2026-09-03T04:42:23.4213339Z"
 }
-

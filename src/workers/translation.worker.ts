@@ -3,18 +3,21 @@ import { env, pipeline } from '@huggingface/transformers';
 
 env.allowLocalModels = false;
 env.useBrowserCache = true;
+if (env.backends.onnx.wasm) env.backends.onnx.wasm.numThreads = 1;
 
 type TranslatorPipeline = Awaited<ReturnType<typeof pipeline>>;
 let translatorPromise: Promise<TranslatorPipeline> | undefined;
 
 function getTranslator(): Promise<TranslatorPipeline> {
   if (!translatorPromise) {
-    translatorPromise = pipeline('translation', 'onnx-community/opus-mt-en-zh', {
+    const pending = pipeline('translation', 'Xenova/opus-mt-en-zh', {
       device: 'wasm',
-      dtype: 'q8',
+      // Keep the translation fallback on the same known-good compatibility
+      // path as Whisper; q8 is affected by the same ORT 1.26 scale bug.
+      dtype: 'fp32',
       progress_callback: (event: Record<string, unknown>) => {
         const rawProgress = Number(event.progress ?? 0);
-        const progress = rawProgress <= 1 ? rawProgress * 100 : rawProgress;
+        const progress = rawProgress;
         self.postMessage({
           type: 'progress',
           label: event.file ? `下载 ${String(event.file).split('/').pop()}` : '下载本地英译中模型',
@@ -22,6 +25,11 @@ function getTranslator(): Promise<TranslatorPipeline> {
         });
       },
     }) as Promise<TranslatorPipeline>;
+    const guarded = pending.catch((error) => {
+      if (translatorPromise === guarded) translatorPromise = undefined;
+      throw error;
+    });
+    translatorPromise = guarded;
   }
   return translatorPromise;
 }
@@ -35,7 +43,9 @@ self.onmessage = async (event: MessageEvent<{ type: string; requestId: string; t
       value: string,
       options: Record<string, unknown>,
     ) => Promise<Array<{ translation_text?: string }>>)(text, { max_new_tokens: 256 });
-    self.postMessage({ type: 'result', requestId, text: output[0]?.translation_text ?? '' });
+    const translated = output[0]?.translation_text?.trim();
+    if (!translated) throw new Error('翻译未返回内容，英文原文已保留，可稍后重试');
+    self.postMessage({ type: 'result', requestId, text: translated });
   } catch (error) {
     self.postMessage({
       type: 'error',
