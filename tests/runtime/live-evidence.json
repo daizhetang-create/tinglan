@@ -1,0 +1,43 @@
+{
+  "testedAt": "2026-09-07T16:37:00Z",
+  "method": "CUA browser on localhost:4504; generated speech PCM at original speed -> MediaStream -> AudioWorklet -> actual Whisper WASM fp32 -> actual local opus-mt translation; separate simultaneous MediaRecorder",
+  "english": {
+    "status": "pass",
+    "syntheticAudioSeconds": 52,
+    "pauseSeconds": 2,
+    "firstTranscriptSeconds": 11.8796,
+    "firstChineseTranslationSeconds": 12.3639,
+    "transcriptBeforeEnd": true,
+    "translationBeforeEnd": true,
+    "segments": 13,
+    "translatedGroups": 7,
+    "peakQueuedChunks": 1,
+    "skippedChunks": 0,
+    "queueAfterStop": 0,
+    "capturedMs": 52120,
+    "savedRecordingBytes": 728407,
+    "recognizedAssignment": "Read Chapter 3 and submit the assignment by next Friday.",
+    "recognizedExam": "This topic will appear on the final exam.",
+    "actualTranslationExample": "请记住工作记忆是关键概念。阅读第三章并在下星期五提交任务。"
+  },
+  "mandarin": {
+    "status": "pass",
+    "firstTranscriptSeconds": 12.4771,
+    "segments": 13,
+    "pauseResumePerformed": true,
+    "peakQueuedChunks": 1,
+    "skippedChunks": 0,
+    "queueAfterStop": 0,
+    "savedRecordingBytes": 759181,
+    "capturedMs": 52792,
+    "recognizedAssignment": "並且在下週五之前提交一份報告",
+    "recognizedExam": "這些內容會出現在期末考試中"
+  },
+  "controllerUnitTests": "3/3 passed: forced stalled-worker overload holds max3 queue and reports skips; silence starts no worker; translation cap24 and dispose reject all pending without restarting workers. These mock controller tests are not inference evidence.",
+  "limitations": [
+    "Models preflighted before timed stream; cold first-use download is not real-time.",
+    "One first-use translation preflight failed with network error; retry succeeded. Network dependency remains.",
+    "Synthetic voice, not human microphone or 60–120 minute classroom stress.",
+    "Tiny model sometimes recognizes Read as Red and fragments sentences at boundaries. Full recording refinement and source checking remain necessary."
+  ]
+}

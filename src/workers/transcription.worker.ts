@@ -13,7 +13,8 @@ type WhisperSize = 'tiny' | 'base';
 type TranscriberPipeline = Awaited<ReturnType<typeof pipeline>>;
 
 interface TranscriptionRequest {
-  type: 'transcribe';
+  type: 'transcribe' | 'warmup';
+  requestId?: string;
   audio: Float32Array;
   model: WhisperSize;
   sourceLanguage?: string;
@@ -77,8 +78,13 @@ function getTranscriber(model: string): Promise<TranscriberPipeline> {
 }
 
 self.onmessage = async (event: MessageEvent<TranscriptionRequest>) => {
-  if (event.data.type !== 'transcribe') return;
+  if (event.data.type !== 'transcribe' && event.data.type !== 'warmup') return;
   try {
+    if (event.data.type === 'warmup') {
+      await getTranscriber(modelId(event.data.model, event.data.sourceLanguage || 'en-US'));
+      self.postMessage({ type: 'engine-ready' });
+      return;
+    }
     if (!event.data.audio?.length || !event.data.audio.every(Number.isFinite)) {
       throw new Error('音频为空或已损坏，请重新选择可播放的录音');
     }
@@ -113,11 +119,12 @@ self.onmessage = async (event: MessageEvent<TranscriptionRequest>) => {
     if (!result.text?.trim() && !result.chunks?.some((chunk) => chunk.text.trim())) {
       throw new Error('未识别到清晰语音，录音已保留，请检查音量或重新转写');
     }
-    self.postMessage({ type: 'result', result });
+    self.postMessage({ type: 'result', requestId: event.data.requestId, result });
   } catch (error) {
     const detail = error instanceof Error ? error.message : '精确转写失败';
     self.postMessage({
-      type: 'error',
+      type: event.data.type === 'warmup' ? 'warmup-error' : 'error',
+      requestId: event.data.requestId,
       message: /Missing required scale|TransposeDQWeightsForMatMulNBits/i.test(detail)
         ? '转写引擎版本不兼容，请重新打开最新版本后重试。无需清除录音或网站数据。'
         : /fetch|network|load file|download/i.test(detail)

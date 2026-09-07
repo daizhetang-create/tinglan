@@ -1,1 +1,27 @@
-{"schemaVersion":1,"id":"LIVE-001","title":"Local streaming speech recognition","priority":"P0","status":"planned","scope":"runtime","recommendedBranch":"codex/live-001","dependsOn":["CORE-001"],"summary":"Capture bounded PCM chunks from MediaStream, run verified worker, report timestamped live segments and recoverable errors; keep full recording independent.","acceptanceCriteria":["Actual timed synthetic English PCM emits text before stream ends","Pause resume and bounded queue work","No mock ASR response in smoke","Type check and build pass"],"evidence":[],"updatedAt":"2026-09-07T14:45:00Z"}
+{
+  "schemaVersion": 1,
+  "id": "LIVE-001",
+  "title": "Local streaming speech recognition",
+  "priority": "P0",
+  "status": "active",
+  "scope": "runtime",
+  "recommendedBranch": "codex/live-001",
+  "dependsOn": [
+    "CORE-001"
+  ],
+  "summary": "Capture bounded PCM chunks from MediaStream, run verified worker, report timestamped live segments and recoverable errors; keep full recording independent.",
+  "acceptanceCriteria": [
+    "Actual timed synthetic English PCM emits text before stream ends",
+    "Pause resume and bounded queue work",
+    "No mock ASR response in smoke",
+    "Type check and build pass"
+  ],
+  "evidence": [
+    "Actual CUA browser English synthetic realtime stream PASS: first transcript11.88s, Chinese12.36s,13 segments,7 translations,both before52s stream end;2s pause/resume;728407-byte MediaRecorder audio retained.",
+    "Actual CUA browser Mandarin synthetic realtime stream PASS: first transcript12.48s,13 segments before52s stream end;2s pause/resume;759181-byte audio retained.",
+    "Real tests queue peak1,max3;after stop queue0/skips0. Controller unit tests3/3 also force overload at max3 and verify silence/disposal.",
+    "npm run check and npm run build passed; detailed evidence tests/runtime/live-evidence.json.",
+    "Limitations disclosed: model preflight required for timed test; first-use translation network error recovered on retry; synthetic speech only, no human mic/long lecture stress; tiny recognition inaccuracies remain."
+  ],
+  "updatedAt": "2026-09-07T16:43:00Z"
+}
