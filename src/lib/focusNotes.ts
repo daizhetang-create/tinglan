@@ -104,9 +104,18 @@ function displayText(segment: TranscriptSegment): string {
 function searchableText(segment: TranscriptSegment): string {
   const source = segment.source.trim();
   const translation = segment.translation.trim();
-  if (!source) return translation;
-  if (!translation || translation === source) return source;
-  return `${source} ${translation}`;
+  const text = !source ? translation : !translation || translation === source ? source : `${source} ${translation}`;
+  // Match common traditional keywords without changing the student's source transcript.
+  const variants: Record<string, string> = {
+    業: '业', 課: '课', 後: '后', 練: '练', 習: '习', 題: '题', 預: '预', 論: '论', 報: '报',
+    項: '项', 組: '组', 閱: '阅', 讀: '读', 頁: '页', 獻: '献', 試: '试', 點: '点', 測: '测',
+    會: '会', 復: '复', 圍: '围', 開: '开', 閉: '闭', 記: '记', 務: '务', 關: '关', 鍵: '键',
+    結: '结', 總: '总', 強: '强', 調: '调', 義: '义', 謂: '谓', 質: '质', 機: '机', 徵: '征',
+    區: '区', 於: '于', 處: '处', 換: '换', 話: '话', 說: '说', 週: '周', 時: '时', 間: '间',
+    補: '补', 答: '答', 簽: '签', 為: '为', 麼: '么', 誰: '谁', 聽: '听', 懂: '懂', 沒: '没',
+    憶: '忆', 應: '应', 當: '当', 與: '与', 寫: '写', 辦: '办', 遲: '迟', 優: '优',
+  };
+  return text.replace(/[\u3400-\u9fff]/g, (character) => variants[character] ?? character);
 }
 
 function cleanTitle(text: string): string {
@@ -115,22 +124,22 @@ function cleanTitle(text: string): string {
   return firstSentence.length > 56 ? `${firstSentence.slice(0, 55)}…` : firstSentence;
 }
 
-function classify(segment: TranscriptSegment, index: number): { category: KeyMessageCategory; score: number } | undefined {
+function classify(segment: TranscriptSegment, index: number): { category: KeyMessageCategory; score: number }[] {
   const text = searchableText(segment);
-  if (!text) return undefined;
+  if (!text) return [];
 
-  let best: { category: KeyMessageCategory; score: number } | undefined;
+  const classifications: { category: KeyMessageCategory; score: number }[] = [];
   for (const rule of RULES) {
     const matches = rule.patterns.reduce((count, pattern) => count + (pattern.test(text) ? 1 : 0), 0);
     if (!matches) continue;
     const candidate = { category: rule.category, score: rule.score + Math.min(matches - 1, 2) };
-    if (!best || candidate.score > best.score) best = candidate;
+    classifications.push(candidate);
   }
-  if (!best && index < 3 && text.length >= 36) return { category: 'concept', score: 4 - index * 0.2 };
-  if (!best && text.length >= 86 && /因为|所以|但是|同时|包括|首先|其次|because|therefore|however|includes|first|second/i.test(text)) {
-    return { category: 'concept', score: 4 };
+  if (!classifications.length && index < 3 && text.length >= 36) return [{ category: 'concept', score: 4 - index * 0.2 }];
+  if (!classifications.length && text.length >= 86 && /因为|所以|但是|同时|包括|首先|其次|because|therefore|however|includes|first|second/i.test(text)) {
+    return [{ category: 'concept', score: 4 }];
   }
-  return best;
+  return classifications;
 }
 
 function normalizeForComparison(value: string): string {
@@ -168,12 +177,11 @@ export function extractKeyMessages(segments: TranscriptSegment[], limit = 8): Ke
   if (safeLimit === 0) return [];
 
   const candidates = segments
-    .map((segment, index) => {
-      const classification = classify(segment, index);
-      if (!classification) return undefined;
+    .flatMap((segment, index) => {
+      const classifications = classify(segment, index);
       const detail = displayText(segment);
-      if (!detail) return undefined;
-      return {
+      if (!detail) return [];
+      return classifications.map((classification) => ({
         id: `key-${segment.id}-${classification.category}`,
         startMs: segment.startMs,
         endMs: segment.endMs,
@@ -182,16 +190,15 @@ export function extractKeyMessages(segments: TranscriptSegment[], limit = 8): Ke
         detail,
         sourceSegmentId: segment.id,
         score: classification.score,
-      } satisfies KeyMessage;
+      } satisfies KeyMessage));
     })
-    .filter((item): item is KeyMessage => Boolean(item))
     .sort((a, b) => b.score - a.score || a.startMs - b.startMs);
 
   const unique: KeyMessage[] = [];
   for (const item of candidates) {
     const duplicate = unique.some((existing) => {
       const textSimilarity = similarity(existing.detail, item.detail);
-      return textSimilarity >= (existing.category === item.category ? 0.72 : 0.9);
+      return existing.category === item.category && textSimilarity >= 0.72;
     });
     if (duplicate) continue;
     unique.push(item);
@@ -282,7 +289,9 @@ export function enrichWithFocusNotes<T extends {
     ...recording,
     keyMessages,
     classBrief: includeBrief
-      ? buildClassBrief(recording.segments, keyMessages, recording.notes, template)
+      ? recording.segments.some((segment) => segment.source.trim() || segment.translation.trim())
+        ? buildClassBrief(recording.segments, keyMessages, recording.notes, template)
+        : undefined
       : recording.classBrief,
   };
 }
