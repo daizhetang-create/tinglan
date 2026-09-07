@@ -92,7 +92,10 @@ function normalizeSettings(value?: LegacySettings): AppSettings {
           : 'zh-CN'
         : value?.sourceLanguage ?? DEFAULT_SETTINGS.sourceLanguage,
     preciseModel,
-    aiProvider: value?.aiProvider === 'local' ? 'local' : 'codex',
+    // Older builds hard-coded local mode. This release adopts the user's chosen subscription route;
+    // later explicit local-mode selections are retained.
+    aiProvider: value?.aiProviderConfigured && value.aiProvider === 'local' ? 'local' : 'codex',
+    aiProviderConfigured: true,
   };
 }
 

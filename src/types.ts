@@ -118,6 +118,7 @@ export interface AppSettings {
   preciseModel: 'tiny' | 'base';
   summaryTemplate: SummaryTemplate;
   aiProvider: 'local' | 'codex';
+  aiProviderConfigured?: boolean;
 }
 
 export const DEFAULT_SETTINGS: AppSettings = {
