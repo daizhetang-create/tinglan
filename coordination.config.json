@@ -1,5 +1,7 @@
 {
   "schemaVersion": 1,
+  "sharedStatusDirectory": "C:/Users/HP/Documents/vibe Coding/Tinglan",
+  "sharedStatusGitCommon": "C:/Users/HP/Documents/11/lectureflow-local/.git",
   "project": "tinglan",
   "mission": "Raise the classroom assistant from a broken prototype to a verified 90/100 product.",
   "defaultBranch": "main",

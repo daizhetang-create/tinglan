@@ -76,6 +76,33 @@ function Write-CoordEvent {
   $temp = "$target.tmp"
   [System.IO.File]::WriteAllText($temp, ($event | ConvertTo-Json -Depth 12), [System.Text.UTF8Encoding]::new($false))
   Move-Item -LiteralPath $temp -Destination $target
+  Export-SharedStatus
+}
+
+function Export-SharedStatus {
+  # Mirrors metadata only, never source files or credentials. Each event keeps an immutable entry.
+  $property = $script:Config.PSObject.Properties['sharedStatusDirectory']
+  if (-not $property -or -not $property.Value) { return }
+  # Isolated test clones must not write the user's real project journal.
+  $guard = $script:Config.PSObject.Properties['sharedStatusGitCommon']
+  if (-not $guard -or [System.IO.Path]::GetFullPath([string]$guard.Value) -ne $script:GitCommon) { return }
+  try {
+    $folder = [System.IO.Path]::GetFullPath([string]$property.Value)
+    New-Item -ItemType Directory -Force -Path $folder | Out-Null
+    $mirrorLock = [System.IO.File]::Open((Join-Path $folder 'status.lock'), [System.IO.FileMode]::OpenOrCreate, [System.IO.FileAccess]::ReadWrite, [System.IO.FileShare]::None)
+    try {
+      $snapshot = [ordered]@{
+        updatedAt = [datetimeoffset]::UtcNow.ToString('o')
+        acceptedMain = Get-MainSha
+        mainRepository = Split-Path -Parent $script:GitCommon
+        latestEventDirectory = $script:EventDirectory
+        leases = @(Get-Leases | Select-Object taskId,owner,scope,branch,worktree,baseSha,expiresAt,paths)
+        ready = @(Get-ReadyItems)
+        instruction = 'Read SKILL.md in this folder, then coord status. Sync source only at a clean boundary; never copy folders over another task.'
+      }
+      Write-AtomicJson -Path (Join-Path $folder 'LIVE_STATUS.json') -Value $snapshot
+    } finally { $mirrorLock.Dispose() }
+  } catch { Write-Warning "Status mirror unavailable; Git coordination remains authoritative: $($_.Exception.Message)" }
 }
 
 function Get-CurrentBranch {
@@ -391,6 +418,7 @@ function Get-ReadyItems {
 }
 
 function Invoke-Status {
+  Export-SharedStatus
   $branch = Get-CurrentBranch
   $mainSha = Get-MainSha
   $headSha = Get-HeadSha
@@ -490,12 +518,26 @@ function Invoke-Claim {
 
 function Invoke-Renew {
   Assert-TaskId
-  $lease = Assert-TaskLease -Id $script:TaskKey
-  $ttl = if ($TtlMinutes -gt 0) { $TtlMinutes } else { [int]$script:Config.leaseMinutes }
-  $lease.expiresAt = [datetimeoffset]::UtcNow.AddMinutes($ttl).ToString('o')
-  Write-AtomicJson -Path (Get-LeasePath -Id $script:TaskKey) -Value $lease
-  Write-CoordEvent -Type 'task.renewed' -Data @{ taskId = $script:TaskKey; expiresAt = $lease.expiresAt }
-  Write-Host "Renewed $script:TaskKey until $($lease.expiresAt)" -ForegroundColor Green
+  $ttl = if ($TtlMinutes -ne 0) { $TtlMinutes } else { [int]$script:Config.leaseMinutes }
+  if ($ttl -lt 15 -or $ttl -gt 1440) { throw 'TtlMinutes must be between 15 and 1440.' }
+  $mutex = Get-CoordMutex
+  try {
+    $path = Get-LeasePath -Id $script:TaskKey
+    if (-not (Test-Path -LiteralPath $path)) { throw 'Task is not claimed.' }
+    $lease = Get-Content -LiteralPath $path -Raw | ConvertFrom-Json
+    if ([string]$lease.branch -ne (Get-CurrentBranch) -or [System.IO.Path]::GetFullPath([string]$lease.worktree) -ne $script:RepoRoot) { throw 'Only the recorded branch and worktree may renew this lease.' }
+    if (Test-LeaseExpired $lease) {
+      if (-not $Reason -or -not $Owner -or $Owner -ne [string]$lease.owner) { throw 'Expired lease recovery requires the original -Owner and a non-empty -Reason.' }
+    } elseif ($Owner -and $Owner -ne [string]$lease.owner) { throw 'Owner does not match the existing lease.' }
+    foreach ($existing in @(Get-Leases)) {
+      if ($existing.taskId -eq $lease.taskId -or (Test-LeaseExpired $existing)) { continue }
+      if ($existing.scope -eq $lease.scope -or (Test-PatternsOverlap -Left @($lease.paths) -Right @($existing.paths))) { throw "Cannot renew: active overlap with $($existing.taskId)." }
+    }
+    $lease.expiresAt = [datetimeoffset]::UtcNow.AddMinutes($ttl).ToString('o')
+    Write-AtomicJson -Path $path -Value $lease
+    Write-CoordEvent -Type 'task.renewed' -Data @{ taskId = $script:TaskKey; expiresAt = $lease.expiresAt; reason = $Reason }
+    Write-Host "Renewed $script:TaskKey until $($lease.expiresAt)" -ForegroundColor Green
+  } finally { $mutex.Dispose() }
 }
 
 function Invoke-Sync {
@@ -546,6 +588,9 @@ function Invoke-Publish {
   $mainSha = Get-MainSha
   $containsMain = Invoke-Git -Arguments @('merge-base', '--is-ancestor', $mainSha, 'HEAD') -AllowFailure
   if ($containsMain.ExitCode -ne 0) { throw 'Task does not contain current main. Run sync -Apply first.' }
+  $lease = Assert-TaskLease -Id $script:TaskKey
+  $changed = (Invoke-Git -Arguments @('diff', '--name-only', '--diff-filter=ACMRD', $mainSha, 'HEAD')).Output
+  Assert-PathsAllowed -Lease $lease -Paths @($changed)
   $results = @(Invoke-ConfiguredChecks)
   if ($Checks) { $results += $Checks }
   Update-TaskStatus -Task $task -Status 'ready' -ResultSummary $Summary -Evidence $results
@@ -653,7 +698,7 @@ function Invoke-HookPreCommit {
   }
   $lease = Get-BranchLease -Branch $branch
   if (-not $lease) { throw "No active lease matches branch '$branch'. Run coord claim first." }
-  $staged = (Invoke-Git -Arguments @('diff', '--cached', '--name-only', '--diff-filter=ACMR')).Output | ForEach-Object { ([string]$_).Trim() } | Where-Object { $_ }
+  $staged = (Invoke-Git -Arguments @('diff', '--cached', '--name-only', '--diff-filter=ACMRD')).Output | ForEach-Object { ([string]$_).Trim() } | Where-Object { $_ }
   Assert-PathsAllowed -Lease $lease -Paths @($staged)
 }
 

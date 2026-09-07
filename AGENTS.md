@@ -25,8 +25,8 @@ Only the integration role may merge ready work into `main`. Never auto-merge, re
 
 ## Product truth
 
-- The current ONNX q8 transcription failure is a P0 blocker. Do not describe Whisper, Chinese translation, Key Messages, or AI Notes as working until real audio smoke tests pass.
-- The current Notes engine is rule-based, not an LLM. Do not label it as GPT/Codex-powered until the Codex App Server bridge is implemented and verified.
+- The original q8 transcription failure is fixed with verified fp32 WASM. Preserve real audio smoke gates; do not regress to q8 without fresh compatibility evidence.
+- The Codex bridge is real and verified with ChatGPT-managed login. Local rules remain an explicitly labelled fallback, not GPT. Read the acceptance report for tested boundaries; do not assert perfect accuracy or long-lecture readiness without evidence.
 - Keep secrets out of browser code and Git. The planned Codex integration uses App Server over a local bridge and ChatGPT-managed authentication.
 - Every AI conclusion intended for the product must retain source recording and timestamp references.
 - Preserve user data and unrelated work. Database schema changes require an explicit migration and a backup/restore test.
@@ -34,4 +34,3 @@ Only the integration role may merge ready work into `main`. Never auto-merge, re
 ## Verification baseline
 
 At minimum, run `npm run check` and `npm run build`. Product completion additionally requires the task-specific acceptance criteria in `docs/coordination/tasks/*.json`; a green TypeScript build alone does not prove audio or model inference works.
-

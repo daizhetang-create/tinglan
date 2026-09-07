@@ -1,7 +1,13 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { LiveTranscriber } from './features/recorder/liveTranscriber';
+import { getCodexStatus, startCodexLogin, generateCodexNotes, type CodexStatus } from './features/assistant/codex';
+import { transcribeRecording } from './features/workflow/transcribe';
+import { abortable } from './features/workflow/abortable';
+import { backupLocalData, restoreLocalData } from './features/storage/backup';
+import { recoverInterruptedRecording } from './features/storage/classRecords';
 import { Icon } from './components/Icon';
 import { Toggle } from './components/Toggle';
-import { chooseRecordingMimeType, decodeAudioTo16k, getAudioDuration } from './lib/audio';
+import { chooseRecordingMimeType, getAudioDuration } from './lib/audio';
 import {
   clearLocalData,
   DEFAULT_COURSE_ID,
@@ -199,6 +205,29 @@ function App() {
   const [editSource, setEditSource] = useState('');
   const [editTranslation, setEditTranslation] = useState('');
 
+  const [aiStatus, setAiStatus] = useState<CodexStatus>({connected:false,authenticated:false,model:'gpt-5.6-luna',message:'正在检查本机 Codex'});
+  const [aiBusy, setAiBusy] = useState(false);
+  const [aiStream, setAiStream] = useState('');
+  const [assistantAnswer, setAssistantAnswer] = useState('');
+  const [summaryScope, setSummaryScope] = useState<'recording'|'class'|'course'>('recording');
+  const [jobBusy, setJobBusy] = useState(false);
+  const liveRef = useRef<LiveTranscriber|null>(null);
+  const liveFailedRef = useRef(false);
+  const recordsRef = useRef<RecordingSession[]>([]);
+  const analysisAbortRef = useRef<AbortController|null>(null);
+  const aiAbortRef = useRef<AbortController|null>(null);
+  const liveAiAtRef = useRef(0);
+  const liveAiPromiseRef = useRef<Promise<unknown>|null>(null);
+  const liveTranslationsRef = useRef(new Set<Promise<void>>());
+  const finalizingRef = useRef(false);
+  const finalizeAbortRef = useRef<AbortController|null>(null);
+  const importRunningRef = useRef(false);
+  const cancelBatchRef = useRef(false);
+  const aiJobRef = useRef(false);
+  const onRecordedRef = useRef<(recording:RecordingSession)=>Promise<void>>(async()=>{});
+  const importBatchRef = useRef<string|undefined>(undefined);
+  const backupInputRef = useRef<HTMLInputElement|null>(null);
+  const pendingSeekRef = useRef<number|null>(null);
   const activeRef = useRef<RecordingSession | null>(null);
   const elapsedRef = useRef(0);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
@@ -213,7 +242,6 @@ function App() {
   const audioElementRef = useRef<HTMLAudioElement | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const importCourseRef = useRef<string | undefined>(undefined);
-  const saveTimerRef = useRef<number | null>(null);
 
   const speechRecognitionConstructor = useMemo(() => {
     const browserWindow = window as typeof window & {
@@ -223,6 +251,13 @@ function App() {
     return browserWindow.SpeechRecognition ?? browserWindow.webkitSpeechRecognition;
   }, []);
 
+  useEffect(() => { recordsRef.current=recordings; },[recordings]);
+  const refreshCodex = useCallback(async()=> {
+    try {setAiStatus(await getCodexStatus());}
+    catch(error) {setAiStatus({connected:false,authenticated:false,model:'gpt-5.6-luna',message:error instanceof Error?error.message:'本机 Codex 服务未启动'});}
+  },[]);
+  useEffect(()=>{void refreshCodex();},[refreshCodex]);
+
   const webGpuAvailable = 'gpu' in navigator;
   const recordingSupported = 'MediaRecorder' in window && Boolean(navigator.mediaDevices?.getUserMedia);
 
@@ -231,11 +266,7 @@ function App() {
     Promise.all([listRecordings(), listCourses(), loadSettings()])
       .then(([savedRecordings, savedCourses, savedSettings]) => {
         if (cancelled) return;
-        const upgradedRecordings = savedRecordings.map((recording) =>
-          recording.segments.length && !recording.keyMessages.length
-            ? { ...enrichWithFocusNotes(recording, savedSettings.summaryTemplate, true), analysisStatus: 'ready' as const }
-            : recording,
-        );
+        const upgradedRecordings = savedRecordings.map(recording => recoverInterruptedRecording(recording));
         setRecordings(upgradedRecordings);
         void Promise.all(upgradedRecordings
           .filter((recording, index) => recording !== savedRecordings[index])
@@ -282,16 +313,11 @@ function App() {
 
   useEffect(() => {
     if (!hydrated || !active) return;
-    if (saveTimerRef.current) window.clearTimeout(saveTimerRef.current);
-    saveTimerRef.current = window.setTimeout(() => {
-      const snapshot = { ...active, updatedAt: new Date().toISOString() };
-      saveRecording(snapshot)
-        .then(() => setRecordings((items) => upsertRecording(items, snapshot)))
-        .catch(() => setToast('本地自动保存失败'));
-    }, 450);
-    return () => {
-      if (saveTimerRef.current) window.clearTimeout(saveTimerRef.current);
-    };
+    const latest = activeRef.current;
+    if (!latest || latest.id !== active.id) return;
+    // Queue immediately; navigation must not discard an outstanding debounced edit.
+    // Completion only reports failures, never writes an older snapshot back to React.
+    saveRecording(latest).catch(() => setToast('本地自动保存失败'));
   }, [active, hydrated]);
 
   useEffect(() => {
@@ -352,6 +378,9 @@ function App() {
     return () => {
       wantsSpeechRef.current = false;
       recognitionRef.current?.abort();
+      liveRef.current?.dispose();
+      analysisAbortRef.current?.abort();
+      aiAbortRef.current?.abort();
       mediaRecorderRef.current?.state !== 'inactive' && mediaRecorderRef.current?.stop();
       captureStreamRef.current?.getTracks().forEach((track) => track.stop());
       if (animationFrameRef.current) cancelAnimationFrame(animationFrameRef.current);
@@ -360,13 +389,24 @@ function App() {
   }, []);
 
   const updateActive = useCallback((updater: (recording: RecordingSession) => RecordingSession) => {
-    setActive((current) => {
-      if (!current) return current;
-      const next = updater(current);
-      activeRef.current = next;
-      return next;
-    });
+    if (!activeRef.current) return;
+    const next={...updater(activeRef.current),updatedAt:new Date().toISOString()};
+    activeRef.current=next;
+    recordsRef.current=upsertRecording(recordsRef.current,next);
+    setRecordings(items=>upsertRecording(items,next));
+    // Enqueue before another click can switch active records in the same render batch.
+    void saveRecording(next).catch(()=>setToast('本地自动保存失败'));
+    setActive(next);
   }, []);
+
+  const persistRecording = useCallback(async(recording:RecordingSession) => {
+    const next={...recording,updatedAt:new Date().toISOString()};
+    recordsRef.current=upsertRecording(recordsRef.current,next);
+    setRecordings(items=>upsertRecording(items,next));
+    if(activeRef.current?.id===next.id){activeRef.current=next;setActive(next);}
+    await saveRecording(next);
+    return next;
+  },[]);
 
   const applyRecordingMode = useCallback((mode: RecordingMode) => {
     const sourceLanguage = mode === 'zh' ? 'zh-CN' : 'en-US';
@@ -396,7 +436,7 @@ function App() {
               segment.id === segmentId ? { ...segment, translation } : segment,
             ),
           };
-          const next = settings.autoKeyMessages
+          const next = settings.autoKeyMessages && settings.aiProvider === 'local'
             ? enrichWithFocusNotes(translated, settings.summaryTemplate, current.status === 'complete')
             : translated;
           activeRef.current = next;
@@ -406,7 +446,7 @@ function App() {
         setRuntimeNotice(error instanceof Error ? error.message : '中文翻译暂时不可用');
       }
     },
-    [settings.autoKeyMessages, settings.autoTranslate, settings.summaryTemplate],
+    [settings.autoKeyMessages, settings.autoTranslate, settings.summaryTemplate, settings.aiProvider],
   );
 
   const appendFinalTranscript = useCallback(
@@ -520,6 +560,7 @@ function App() {
   }, []);
 
   const startRecording = useCallback(async () => {
+    if (analysisAbortRef.current || aiJobRef.current || finalizingRef.current) {setToast('请等待当前处理完成或取消后再录音');return;}
     if (!recordingSupported) {
       setToast('当前浏览器不支持录音，请使用最新版 Edge 或 Chrome');
       return;
@@ -551,24 +592,34 @@ function App() {
       recorder.ondataavailable = (event) => {
         if (event.data.size) audioChunksRef.current.push(event.data);
       };
+      const recordingId=current.id;
       recorder.onstop = () => {
+        finalizingRef.current=true;setJobBusy(true);
+        const finalizeController=new AbortController();finalizeAbortRef.current=finalizeController;
         const blob = new Blob(audioChunksRef.current, { type: recorder.mimeType || mimeType || 'audio/webm' });
-        updateActive((recording) => {
-          const completed = {
-            ...recording,
-            durationMs: elapsedRef.current,
-            status: 'complete' as const,
-            analysisStatus: recording.segments.length ? 'ready' as const : 'idle' as const,
-            audioBlob: blob,
-            audioMimeType: blob.type,
-          };
-          return settings.autoKeyMessages
-            ? enrichWithFocusNotes(completed, settings.summaryTemplate, true)
-            : completed;
-        });
+        const completed:RecordingSession={...(activeRef.current?.id===recordingId?activeRef.current:current!),durationMs:elapsedRef.current,status:'complete',analysisStatus:'queued',analysisError:undefined,audioBlob:blob,audioMimeType:blob.type};
+        activeRef.current=completed;setActive(completed);
         setNotesTab('brief');
-        setRuntimeNotice('录音已保存，Class Brief 已整理；也可运行本地精确转写校正字幕');
-        releaseCapture();
+        setRuntimeNotice('录音结束，正在保存音频并整理剩余字幕…');
+        wantsSpeechRef.current=false;
+        recognitionRef.current?.stop();
+        void (async()=>{
+          try {
+            await persistRecording(completed);
+            try { await abortable(Promise.resolve(liveRef.current?.stop()),finalizeController.signal); } catch { liveFailedRef.current=true; }
+            finalizeController.signal.throwIfAborted();
+            await abortable(Promise.allSettled([...liveTranslationsRef.current]),finalizeController.signal);
+            await abortable(Promise.resolve(liveAiPromiseRef.current),finalizeController.signal);
+            finalizeController.signal.throwIfAborted();
+            liveRef.current?.dispose();liveRef.current=null;
+            const latest=activeRef.current?.id===recordingId?activeRef.current:completed;
+            releaseCapture();
+            await onRecordedRef.current({...latest,audioBlob:blob,audioMimeType:blob.type,status:'complete',durationMs:completed.durationMs});
+          } catch(error) {
+            releaseCapture();
+            setRuntimeNotice(error instanceof Error?error.message:'保存或处理失败，录音仍在当前页面，请先导出音频');
+          } finally { liveRef.current?.dispose();liveRef.current=null;releaseCapture();finalizeAbortRef.current=null;finalizingRef.current=false;setJobBusy(false); }
+        })();
       };
       capture.getAudioTracks()[0].addEventListener('ended', () => {
         if (mediaRecorderRef.current?.state !== 'inactive') mediaRecorderRef.current?.stop();
@@ -577,22 +628,37 @@ function App() {
       recordingStartedAtRef.current = performance.now() - elapsedRef.current;
       updateActive((recording) => ({ ...recording, status: 'recording' }));
       startVisualizer(audioStream);
-      if (inputSource === 'microphone') {
-        beginSpeechRecognition();
-      } else {
-        setRuntimeNotice('正在录制系统声音；结束后点击“本地精确转写”生成字幕');
-      }
+      liveFailedRef.current=false;
+      liveAiAtRef.current=0;
+      const live = new LiveTranscriber({
+        sourceLanguage:current.sourceLanguage,model:'tiny',
+        onSegments:(segments)=>{
+          if(activeRef.current?.id!==recordingId)return;
+          updateActive(recording=>({...recording,segments:[...recording.segments,...segments],keyMessages:settings.aiProvider==='local'?extractKeyMessages([...recording.segments,...segments]):recording.keyMessages}));
+          for(const segment of segments) {
+            const pending=translateSegment(segment.id,segment.source,recordingId);
+            liveTranslationsRef.current.add(pending);
+            void pending.finally(()=>liveTranslationsRef.current.delete(pending));
+          }
+        },
+        onProgress:setPreciseProgress,
+        onError:(message)=>{liveFailedRef.current=true;setRuntimeNotice(message+'；完整录音会在停止后重新转写。');},
+      });
+      liveRef.current=live;
+      try {await live.start(audioStream);setRuntimeNotice('本地实时转写已启动，字幕按语音片段出现。首次下载模型会有等待。');}
+      catch(error) {liveFailedRef.current=true;live.dispose();liveRef.current=null;setRuntimeNotice(error instanceof Error?error.message:'实时转写启动失败，停止后将完整转写');if(inputSource==='microphone')beginSpeechRecognition();}
     } catch (error) {
       releaseCapture();
       setRuntimeNotice(error instanceof Error ? error.message : '无法开始录音');
       setToast('没有开始录音，请检查麦克风或共享音频权限');
     }
-  }, [beginSpeechRecognition, inputSource, recordingSupported, releaseCapture, settings, startVisualizer, updateActive]);
+  }, [beginSpeechRecognition, inputSource, recordingSupported, releaseCapture, settings, startVisualizer, updateActive, persistRecording, translateSegment]);
 
   const pauseRecording = useCallback(() => {
     const recorder = mediaRecorderRef.current;
     if (!recorder || recorder.state !== 'recording') return;
     recorder.pause();
+    liveRef.current?.pause();
     wantsSpeechRef.current = false;
     recognitionRef.current?.stop();
     setInterimText('');
@@ -604,9 +670,10 @@ function App() {
     const recorder = mediaRecorderRef.current;
     if (!recorder || recorder.state !== 'paused') return;
     recorder.resume();
+    liveRef.current?.resume();
     recordingStartedAtRef.current = performance.now() - elapsedRef.current;
     updateActive((recording) => ({ ...recording, status: 'recording' }));
-    if (inputSource === 'microphone') beginSpeechRecognition();
+    if (!liveRef.current && inputSource === 'microphone') beginSpeechRecognition();
     setRuntimeNotice('继续录音');
   }, [beginSpeechRecognition, inputSource, updateActive]);
 
@@ -621,6 +688,7 @@ function App() {
   }, [releaseCapture]);
 
   const openNewRecording = useCallback(() => {
+    if(finalizingRef.current||importRunningRef.current){setToast('请等待录音收尾或批量处理结束');return;}
     if (activeRef.current?.status === 'recording' || activeRef.current?.status === 'paused') {
       setToast('请先停止当前录音');
       setPage('recorder');
@@ -636,6 +704,7 @@ function App() {
   }, [courseFilter, settings]);
 
   const openRecording = useCallback((recording: RecordingSession) => {
+    if(finalizingRef.current){setToast('正在保存最后的字幕，请稍候');return;}
     if (
       activeRef.current?.id !== recording.id &&
       (activeRef.current?.status === 'recording' || activeRef.current?.status === 'paused')
@@ -645,6 +714,8 @@ function App() {
     }
     activeRef.current = recording;
     setActive(recording);
+    setSummaryScope(recording.summaryScope??'recording');
+    setAssistantAnswer('');
     elapsedRef.current = 0;
     setElapsedMs(0);
     setInterimText('');
@@ -652,6 +723,7 @@ function App() {
   }, []);
 
   const loadDemo = useCallback(() => {
+    if(finalizingRef.current||importRunningRef.current||analysisAbortRef.current||aiJobRef.current||activeRef.current?.status==='recording'||activeRef.current?.status==='paused'){setToast('请先完成当前处理');return;}
     const session = createSession(settings, '认知心理学 · 示例课堂');
     const demoBase: RecordingSession = {
       ...session,
@@ -675,127 +747,103 @@ function App() {
     setToast('示例已载入，可以体验编辑、笔记与导出');
   }, [settings]);
 
-  const transcribeAudio = useCallback(async (recording: RecordingSession): Promise<TranscriptSegment[]> => {
-    if (!recording.audioBlob) throw new Error('这条记录没有可读取的音频');
-    setPreciseProgress({ label: `正在解码：${recording.title}`, state: 'working' });
-    const audio = await decodeAudioTo16k(recording.audioBlob);
-    return new Promise((resolve, reject) => {
-      const worker = new Worker(new URL('./workers/transcription.worker.ts', import.meta.url), { type: 'module' });
-      const fail = (message: string) => {
-        worker.terminate();
-        reject(new Error(message));
-      };
-      worker.onerror = (event) => fail(event.message || '本地模型运行失败');
-      worker.onmessage = (event: MessageEvent<Record<string, unknown>>) => {
-        const message = event.data;
-        if (message.type === 'progress') {
-          setPreciseProgress({
-            label: String(message.label ?? '正在下载本地 Whisper 模型'),
-            progress: typeof message.progress === 'number' ? message.progress : undefined,
-            state: 'downloading',
-          });
-          return;
-        }
-        if (message.type === 'working') {
-          setPreciseProgress({ label: String(message.label ?? '正在本地转写'), state: 'working' });
-          return;
-        }
-        if (message.type === 'error') {
-          fail(String(message.message ?? '本地转写失败'));
-          return;
-        }
-        if (message.type !== 'result') return;
-        const result = message.result as {
-          text?: string;
-          chunks?: Array<{ text: string; timestamp: [number, number | null] }>;
-        };
-        const chunks = result.chunks?.filter((chunk) => chunk.text.trim()) ?? [];
-        const segments: TranscriptSegment[] = chunks.length
-          ? chunks.map((chunk) => ({
-              id: makeId('segment'),
-              startMs: Math.max(0, chunk.timestamp[0] * 1000),
-              endMs: Math.max((chunk.timestamp[1] ?? chunk.timestamp[0] + 3) * 1000, 1000),
-              speaker: '讲师',
-              source: chunk.text.trim(),
-              translation: '',
-            }))
-          : [{
-              id: makeId('segment'),
-              startMs: 0,
-              endMs: recording.durationMs,
-              speaker: '讲师',
-              source: result.text?.trim() || '（未识别到清晰语音）',
-              translation: '',
-            }];
-        worker.terminate();
-        resolve(segments);
-      };
-      worker.postMessage({
-        type: 'transcribe',
-        audio,
-        model: settings.preciseModel,
-        sourceLanguage: recording.sourceLanguage,
-      }, [audio.buffer]);
-    });
-  }, [settings.preciseModel]);
-
-  const analyzeRecording = useCallback(async (recording: RecordingSession): Promise<RecordingSession> => {
-    const queued: RecordingSession = { ...recording, analysisStatus: 'transcribing', analysisError: undefined };
-    await saveRecording(queued);
-    setRecordings((items) => upsertRecording(items, queued));
-    if (activeRef.current?.id === queued.id) {
-      activeRef.current = queued;
-      setActive(queued);
-    }
+  const generateNotes = useCallback(async(recording:RecordingSession, scope:'recording'|'class'|'course'='recording', prompt?:string, parentSignal?:AbortSignal, answerOnly=false) => {
+    parentSignal?.throwIfAborted();
+    if(aiJobRef.current)throw new Error('Codex 正在处理，请稍后重试');
+    const all=upsertRecording(recordsRef.current,recording);
+    const sources=(scope==='course' && recording.courseId && recording.courseId!==DEFAULT_COURSE_ID
+      ? all.filter(item=>item.courseId===recording.courseId)
+      : scope==='class' && recording.batchId ? all.filter(item=>item.batchId===recording.batchId) : [recording])
+      .filter(item=>item.segments.length).sort((a,b)=>a.createdAt.localeCompare(b.createdAt));
+    if(!sources.length)throw new Error('需要先有转写文字，才能生成纪要');
+    const controller=new AbortController();
+    const abortFromParent=()=>controller.abort();
+    parentSignal?.addEventListener('abort',abortFromParent,{once:true});
+    aiAbortRef.current=controller;aiJobRef.current=true;setAiBusy(true);setAiStream('');setAssistantAnswer('');
     try {
-      let segments = await transcribeAudio(queued);
-      const shouldTranslate = queued.recordingMode === 'en-zh' && settings.autoTranslate;
-      const summarizing: RecordingSession = { ...queued, segments, analysisStatus: 'summarizing' };
-      setRecordings((items) => upsertRecording(items, summarizing));
-      if (activeRef.current?.id === summarizing.id) {
-        activeRef.current = summarizing;
-        setActive(summarizing);
+      const result=await generateCodexNotes(sources,prompt,text=>setAiStream(value=>(value+text).slice(-12000)),controller.signal);
+      const sections:NonNullable<RecordingSession['classBrief']>['sections']={concepts:[],takeaways:[],assignments:[],examReading:[],followUps:[]};
+      const mapping={concept:'concepts',emphasis:'takeaways',assignment:'assignments',exam:'examReading',question:'followUps',admin:'followUps'} as const;
+      result.items.forEach((item,index)=>sections[mapping[item.category]].push({id:'ai-'+index+'-'+item.sourceSegmentId,text:item.text,atMs:item.atMs,sourceSegmentId:item.sourceSegmentId,sourceRecordingId:item.sourceRecordingId,due:item.due}));
+      const latest=activeRef.current?.id===recording.id?activeRef.current:(recordsRef.current.find(item=>item.id===recording.id)??recording);
+      // A focused question must not replace the saved, comprehensive classroom summary.
+      if(answerOnly){
+        const preserved=await persistRecording({...latest,aiError:undefined});
+        setAssistantAnswer(result.answer||result.overview);
+        setAiStream('');setNotesTab('brief');
+        return preserved;
       }
-      if (shouldTranslate) {
-        setPreciseProgress({ label: '正在逐段生成中文理解', state: 'working' });
-        const translated: TranscriptSegment[] = [];
-        for (const segment of segments) {
-          let translation = '';
-          try {
-            translation = await translationServiceRef.current?.translate(segment.source) ?? '';
-          } catch {
-            // Keep the original transcript if one translation segment fails.
-          }
-          translated.push({ ...segment, translation });
-        }
-        segments = translated;
-      }
-      const finished = enrichWithFocusNotes(
-        { ...summarizing, segments, analysisStatus: 'ready' as const, updatedAt: new Date().toISOString() },
-        settings.summaryTemplate,
-        true,
-      );
-      await saveRecording(finished);
-      setRecordings((items) => upsertRecording(items, finished));
-      if (activeRef.current?.id === finished.id) {
-        activeRef.current = finished;
-        setActive(finished);
-      }
-      setPreciseProgress({ label: `${queued.recordingMode === 'zh' ? '中文' : '双语'}笔记已生成`, progress: 100, state: 'ready' });
+      const finished:RecordingSession={...latest,analysisStatus:latest.status==='recording'||latest.status==='paused'?latest.analysisStatus:'ready',aiError:undefined,summaryScope:scope,
+        keyMessages:result.items.map((item,index)=>({id:'ai-key-'+index,category:item.category,title:item.text,detail:item.text,startMs:item.atMs,endMs:item.atMs,sourceSegmentId:item.sourceSegmentId,sourceRecordingId:item.sourceRecordingId,score:10})),
+        classBrief:{overview:result.overview,sections,generatedAt:result.generatedAt,engine:'codex',model:result.model,threadId:result.threadId,sourceSegmentCount:sources.reduce((sum,item)=>sum+item.segments.length,0),template:settings.summaryTemplate}};
+      await persistRecording(finished);
+      if(result.answer)setAssistantAnswer(result.answer);
+      setAiStream('');setNotesTab('brief');
       return finished;
-    } catch (error) {
-      const message = error instanceof Error ? error.message : '本地转写失败';
-      const failed: RecordingSession = { ...queued, analysisStatus: 'error', analysisError: message };
-      await saveRecording(failed);
-      setRecordings((items) => upsertRecording(items, failed));
-      if (activeRef.current?.id === failed.id) {
-        activeRef.current = failed;
-        setActive(failed);
+    } catch(error) {
+      const message=controller.signal.aborted?'已取消 AI 整理，录音和文字已保留，可重试':error instanceof Error?error.message:'Codex 生成失败';
+      const latest=activeRef.current?.id===recording.id?activeRef.current:(recordsRef.current.find(item=>item.id===recording.id)??recording);
+      await persistRecording({...latest,aiError:message,analysisStatus:latest.status==='recording'||latest.status==='paused'?latest.analysisStatus:'error'});
+      throw new Error(message);
+    } finally {parentSignal?.removeEventListener('abort',abortFromParent);aiJobRef.current=false;setAiBusy(false);aiAbortRef.current=null;}
+  },[persistRecording,settings.summaryTemplate]);
+
+  const analyzeRecording = useCallback(async (recording: RecordingSession, reuseTranscript=false): Promise<RecordingSession> => {
+    if(analysisAbortRef.current)throw new Error('已有转写任务正在处理，请等待或取消');
+    const controller=new AbortController();analysisAbortRef.current=controller;setJobBusy(true);
+    let working:RecordingSession={...recording,analysisStatus:'transcribing',analysisError:undefined};
+    const saveStage=async(patch:Partial<RecordingSession>)=>{
+      const latest=activeRef.current?.id===recording.id?activeRef.current:(recordsRef.current.find(item=>item.id===recording.id)??working);
+      return persistRecording({...latest,...patch});
+    };
+    try {
+      working=await saveStage({analysisStatus:'transcribing',analysisError:undefined,aiError:undefined});
+      controller.signal.throwIfAborted();
+      const segments=reuseTranscript&&working.segments.length?working.segments:await transcribeRecording(working,settings.preciseModel,setPreciseProgress,controller.signal);
+      controller.signal.throwIfAborted();
+      working=await saveStage({segments,analysisStatus:'summarizing'});
+      let translationError='';
+      if(working.recordingMode==='en-zh'&&settings.autoTranslate) {
+        for(const segment of working.segments) {
+          if(controller.signal.aborted)throw new Error('已取消，音频和文字已保留');
+          if(segment.translation)continue;
+          setPreciseProgress({label:'正在生成中文翻译',state:'working'});
+          try {segment.translation=await translationServiceRef.current?.translate(segment.source)??'';controller.signal.throwIfAborted();}
+          catch(error){translationError=error instanceof Error?error.message:'中文翻译未完成';break;}
+          working=await saveStage({segments:[...working.segments]});
+        }
       }
-      setPreciseProgress({ label: message, state: 'error' });
-      throw error;
-    }
-  }, [settings.autoTranslate, settings.summaryTemplate, transcribeAudio]);
+      controller.signal.throwIfAborted();
+      const local=enrichWithFocusNotes(working,settings.summaryTemplate,true);
+      working=await saveStage({keyMessages:local.keyMessages,classBrief:local.classBrief,analysisStatus:settings.aiProvider==='codex'?'summarizing':'ready',analysisError:translationError||undefined});
+      controller.signal.throwIfAborted();
+      if(settings.aiProvider==='codex') {
+        try {working=await generateNotes(working,working.batchId?'class':'recording',undefined,controller.signal);}
+        catch(error){working={...working,aiError:error instanceof Error?error.message:'Codex 未完成'};}
+      }
+      setPreciseProgress({label:working.aiError?'文字已保存；Codex 纪要未完成，可重试':translationError?'文字和笔记已保存；中文翻译未完成':'转写与分类笔记已保存',state:working.aiError||translationError?'error':'ready',progress:100});
+      return working;
+    } catch(error) {
+      const message=controller.signal.aborted?'已取消处理，音频和已生成的文字已保留':error instanceof Error?error.message:'转写失败';
+      await saveStage({analysisStatus:'error',analysisError:message});
+      setPreciseProgress({label:message,state:'error'});
+      throw new Error(message);
+    } finally {analysisAbortRef.current=null;setJobBusy(false);}
+  },[persistRecording,settings.autoTranslate,settings.preciseModel,settings.summaryTemplate,settings.aiProvider,generateNotes]);
+
+  onRecordedRef.current=async recording=>{
+    // Final full-recording pass refines approximate live chunk boundaries before final notes.
+    const finished=await analyzeRecording(recording,false);
+    setRuntimeNotice(finished.aiError||finished.analysisError||'录音、文字和笔记已保存');
+  };
+
+  useEffect(()=>{
+    if(active?.status!=='recording'||settings.aiProvider!=='codex'||!settings.autoKeyMessages||aiJobRef.current||!active.segments.length)return;
+    const chars=active.segments.reduce((sum,segment)=>sum+segment.source.length,0);
+    if(chars<80||Date.now()-liveAiAtRef.current<30_000)return;
+    liveAiAtRef.current=Date.now();
+    liveAiPromiseRef.current=generateNotes(active,'recording','根据目前已经出现的课堂原话，更新实时要点。未明确的日期标为待确认。').catch(()=>undefined).finally(()=>{liveAiPromiseRef.current=null;});
+  },[active?.segments.length,active?.status,settings.aiProvider,settings.autoKeyMessages,generateNotes]);
 
   const handleAudioImport = useCallback(async (files: File[]) => {
     const validFiles = files.filter((file) => file.type.startsWith('audio/') || /\.(mp3|m4a|wav|webm|ogg|mp4)$/i.test(file.name));
@@ -803,7 +851,10 @@ function App() {
       setToast('请选择音频文件');
       return;
     }
-    const batchId = makeId('batch');
+    if(jobBusy||aiJobRef.current||finalizingRef.current||importRunningRef.current||activeRef.current?.status==='recording'||activeRef.current?.status==='paused'){setToast('请先结束当前录音或处理任务');return;}
+    importRunningRef.current=true;cancelBatchRef.current=false;
+    const batchId = importBatchRef.current ?? makeId('batch');
+    let processingFailures=0;
     const imported: RecordingSession[] = [];
     const totalSteps = validFiles.length * (settings.autoAnalyzeUploads ? 2 : 1);
     setPage('library');
@@ -832,25 +883,32 @@ function App() {
     }
     if (settings.autoAnalyzeUploads) {
       for (const [index, session] of imported.entries()) {
+        if(cancelBatchRef.current)break;
         setBatchProgress((current) => current ? {
           ...current,
           currentName: `生成笔记 ${index + 1}/${imported.length} · ${session.title}`,
         } : current);
         try {
-          await analyzeRecording(session);
+          const analyzed=await analyzeRecording(session);
+          if(analyzed.aiError||analyzed.analysisError)processingFailures++;
         } catch {
+          processingFailures++;
           setBatchProgress((current) => current ? { ...current, failed: current.failed + 1 } : current);
         }
         setBatchProgress((current) => current ? { ...current, completed: Math.min(current.total, current.completed + 1) } : current);
       }
     }
-    setBatchProgress((current) => current ? { ...current, completed: current.total, currentName: '批量处理完成' } : current);
+    setBatchProgress((current) => current ? { ...current, completed: current.total, currentName: cancelBatchRef.current?'批量处理已取消':'批量处理完成' } : current);
     window.setTimeout(() => setBatchProgress(null), 4500);
-    setToast(`${imported.length} 段音频已加入${settings.autoAnalyzeUploads ? '并生成笔记' : '资料库'}`);
+    setToast(`${imported.length} 段音频已保存${processingFailures ? `，${processingFailures} 段处理未完成，请打开重试` : settings.autoAnalyzeUploads ? '，笔记处理已完成' : ''}`);
+    importBatchRef.current=undefined;
     importCourseRef.current = undefined;
-  }, [analyzeRecording, settings]);
+    importRunningRef.current=false;
+    if(cancelBatchRef.current)setToast('批量处理已取消，已导入音频保留，可逐条重试');
+  }, [analyzeRecording, settings, jobBusy]);
 
   const runPreciseTranscription = useCallback(async () => {
+    if(analysisAbortRef.current||aiJobRef.current||finalizingRef.current||importRunningRef.current){setToast('请等待当前处理结束');return;}
     const recording = activeRef.current;
     if (!recording?.audioBlob) {
       setToast('这条记录没有音频，无法精确转写');
@@ -859,9 +917,9 @@ function App() {
     if (recording.segments.length && !window.confirm('精确转写会替换当前字幕，但不会删除笔记。继续吗？')) return;
     setRuntimeNotice('首次使用会下载本地 Whisper 模型，之后可离线复用');
     try {
-      await analyzeRecording(recording);
+      const finished=await analyzeRecording(recording);
       setNotesTab('brief');
-      setRuntimeNotice(`${recording.recordingMode === 'zh' ? '中文' : '双语'}转写和 Class Brief 已完成`);
+      setRuntimeNotice(finished.aiError || finished.analysisError || '转写和分类纪要已保存');
     } catch (error) {
       setRuntimeNotice(error instanceof Error ? error.message : '精确转写失败');
     }
@@ -882,13 +940,43 @@ function App() {
   }, [noteDraft, updateActive]);
 
   const regenerateBrief = useCallback(() => {
-    updateActive((recording) => ({
-      ...enrichWithFocusNotes(recording, settings.summaryTemplate, true),
-      analysisStatus: recording.segments.length ? 'ready' : recording.analysisStatus,
-    }));
+    if(analysisAbortRef.current||finalizingRef.current||importRunningRef.current){setToast('请等待转写结束后再整理');return;}
+    const recording=activeRef.current;
+    if(!recording?.segments.length){setToast('请先完成转写');return;}
     setNotesTab('brief');
-    setToast('Class Brief 已按最新内容重新整理');
-  }, [settings.summaryTemplate, updateActive]);
+    if(settings.aiProvider==='codex') {
+      void generateNotes(recording,summaryScope).catch(error=>setToast(error instanceof Error?error.message:'Codex 请求失败'));
+    } else {
+      updateActive(item=>({...enrichWithFocusNotes(item,settings.summaryTemplate,true),analysisStatus:'ready'}));
+      setToast('已按本地规则整理；这不是大模型纪要');
+    }
+  },[generateNotes,settings.aiProvider,settings.summaryTemplate,summaryScope,updateActive]);
+
+  const appendToClass = useCallback(async()=>{
+    const recording=activeRef.current;
+    if(!recording || recording.status==='recording'||recording.status==='paused'||jobBusy||aiBusy)return;
+    const batchId=recording.batchId??makeId('batch');
+    await persistRecording({...recording,batchId});
+    importBatchRef.current=batchId;
+    importCourseRef.current=recording.courseId;
+    fileInputRef.current?.click();
+  },[aiBusy,jobBusy,persistRecording]);
+
+  const connectCodex = useCallback(async()=>{
+    try {const login=await startCodexLogin();window.open(login.authUrl,'_blank','noopener,noreferrer');setToast('请在官方登录页完成登录，再点检查连接');}
+    catch(error){setToast(error instanceof Error?error.message:'无法启动登录');}
+  },[]);
+
+  const restoreBackup = useCallback(async(file:File)=>{
+    if(jobBusy||aiBusy||activeRef.current?.status==='recording'||activeRef.current?.status==='paused'){setToast('请先停止录音并等待处理完成');return;}
+    try{
+      const restored=await restoreLocalData(file);
+      const [records,groups,prefs]=await Promise.all([listRecordings(),listCourses(),loadSettings()]);
+      setRecordings(records);recordsRef.current=records;
+      setCourses(groups.filter(course=>course.id!==DEFAULT_COURSE_ID));setSettings(prefs);
+      setToast('恢复成功：'+restored.recordings+' 段录音、'+restored.courses+' 门课程；已有数据保留');
+    }catch(error){setToast(error instanceof Error?error.message:'恢复失败，原数据未修改');}
+  },[aiBusy,jobBusy]);
 
   const shareActiveRecording = useCallback(async () => {
     const recording = activeRef.current;
@@ -909,30 +997,15 @@ function App() {
   }, []);
 
   const runAssistantPrompt = useCallback((suggestion?: string) => {
-    const prompt = (suggestion ?? assistantPrompt).trim();
-    if (!prompt) return;
-    const recording = activeRef.current;
-    if (!recording?.segments.length) {
-      setToast('需要先有转写内容，才能整理课堂笔记');
-      return;
-    }
-    const isOrganizeCommand = /总结|总纪要|纪要|整理|概括|作业|截止|考试|考点|测验|随手记|原话|笔记/.test(prompt);
-    if (isOrganizeCommand) {
-      regenerateBrief();
-      setNotesTab(/随手记|原话|笔记/.test(prompt) ? 'notes' : 'brief');
-      setBriefFilter(/作业|截止/.test(prompt) ? 'assignments' : /考试|考点|测验/.test(prompt) ? 'exam' : 'all');
-      setToast('已按你的要求整理现有课堂内容');
-    } else {
-      const searchTerm = prompt.replace(/^(搜索|查找|找一下)\s*/, '').trim() || prompt;
-      const normalized = searchTerm.toLowerCase();
-      const matchCount = recording.segments.filter((segment) => `${segment.speaker} ${segment.source} ${segment.translation}`.toLowerCase().includes(normalized)).length;
-      setTranscriptQuery(searchTerm);
-      setShowTranscriptSearch(true);
-      setMobilePane('transcript');
-      setToast(matchCount ? `在转写中找到 ${matchCount} 个相关片段` : '转写中没有找到这个关键词');
-    }
-    setAssistantPrompt('');
-  }, [assistantPrompt, regenerateBrief]);
+    if(analysisAbortRef.current||finalizingRef.current||importRunningRef.current){setToast('请等待转写结束后再提问');return;}
+    const prompt=(suggestion??assistantPrompt).trim();
+    const recording=activeRef.current;
+    if(!recording?.segments.length){setToast('请先转写，再生成纪要或提问');return;}
+    if(settings.aiProvider==='local'){regenerateBrief();setToast('当前是本地规则模式；切换 Codex 后可智能问答');return;}
+    const answerOnly=Boolean(prompt && suggestion!=='生成总纪要');
+    void generateNotes(recording,summaryScope,prompt||undefined,undefined,answerOnly)
+      .then(()=>setAssistantPrompt('')).catch(error=>setToast(error instanceof Error?error.message:'Codex 请求失败'));
+  },[assistantPrompt,generateNotes,regenerateBrief,settings.aiProvider,summaryScope]);
 
   const addBookmark = useCallback(
     (atMs?: number, label = '重点') => {
@@ -958,6 +1031,16 @@ function App() {
     void audio.play().catch(() => undefined);
   }, []);
 
+  const seekSource = useCallback((atMs:number,recordingId?:string)=>{
+    if(recordingId && recordingId!==activeRef.current?.id){
+      if(activeRef.current?.status==='recording'||activeRef.current?.status==='paused'){setToast('请先停止录音再回放其他来源');return;}
+      const source=recordsRef.current.find(record=>record.id===recordingId);
+      if(!source){setToast('来源录音不存在，可能已被删除');return;}
+      pendingSeekRef.current=atMs;openRecording(source);setMobilePane('transcript');
+      if(!source.audioBlob){setToast('来源没有音频，已打开对应转写');pendingSeekRef.current=null;}
+    }else seekTo(atMs);
+  },[openRecording,seekTo]);
+
   const toggleAudioPlayback = useCallback(() => {
     const audio = audioElementRef.current;
     if (!audio) return;
@@ -980,6 +1063,7 @@ function App() {
 
   const saveSegmentEdit = useCallback(() => {
     if (!editingSegment || !editSource.trim()) return;
+    if(jobBusy||aiBusy){setToast('请在处理结束后编辑原文，避免纪要引用失效');return;}
     updateActive((recording) => ({
       ...recording,
       segments: recording.segments.map((item) =>
@@ -993,8 +1077,10 @@ function App() {
   }, [editSource, editTranslation, editingSegment, updateActive]);
 
   const removeRecording = useCallback(async (recording: RecordingSession) => {
+    if(finalizingRef.current||importRunningRef.current||analysisAbortRef.current||aiJobRef.current||activeRef.current?.status==='recording'||activeRef.current?.status==='paused'){setToast('请先停止录音并完成或取消当前处理，再删除资料');return;}
     if (!window.confirm(`确定删除“${recording.title}”及其本地音频吗？此操作无法撤销。`)) return;
     await deleteRecording(recording.id);
+    recordsRef.current=recordsRef.current.filter(item=>item.id!==recording.id);
     setRecordings((items) => items.filter((item) => item.id !== recording.id));
     if (activeRef.current?.id === recording.id) {
       activeRef.current = null;
@@ -1026,16 +1112,17 @@ function App() {
   }, [courseName, courseTerm, courses.length]);
 
   const removeCourse = useCallback(async (course: Course) => {
+    if(finalizingRef.current||importRunningRef.current||analysisAbortRef.current||aiJobRef.current||activeRef.current?.status==='recording'||activeRef.current?.status==='paused'){setToast('请先停止录音并完成或取消当前处理，再删除分组');return;}
     if (!window.confirm(`删除课程分组“${course.name}”？录音会保留并移到“未分组”。`)) return;
     await deleteCourse(course.id);
-    const affected = recordings.filter((recording) => recording.courseId === course.id);
-    await Promise.all(affected.map((recording) => saveRecording({ ...recording, courseId: undefined })));
+    // deleteCourse atomically moves all records to the default group in IndexedDB.
+    recordsRef.current=recordsRef.current.map(recording=>recording.courseId===course.id?{...recording,courseId:DEFAULT_COURSE_ID}:recording);
     setCourses((items) => items.filter((item) => item.id !== course.id));
-    setRecordings((items) => items.map((recording) => recording.courseId === course.id ? { ...recording, courseId: undefined } : recording));
-    if (activeRef.current?.courseId === course.id) updateActive((recording) => ({ ...recording, courseId: undefined }));
+    setRecordings(recordsRef.current);
+    if (activeRef.current?.courseId === course.id) updateActive((recording) => ({ ...recording, courseId: DEFAULT_COURSE_ID }));
     if (courseFilter === course.id) setCourseFilter('all');
     setToast('课程分组已删除，录音仍然保留');
-  }, [courseFilter, recordings, updateActive]);
+  }, [courseFilter, updateActive]);
 
   const installApp = useCallback(async () => {
     if (!installPrompt) {
@@ -1049,8 +1136,10 @@ function App() {
   }, [installPrompt]);
 
   const clearEverything = useCallback(async () => {
+    if(finalizingRef.current||importRunningRef.current||analysisAbortRef.current||aiJobRef.current||activeRef.current?.status==='recording'||activeRef.current?.status==='paused'){setToast('请先停止录音并完成或取消当前处理，再清除资料');return;}
     if (!window.confirm('确定删除所有录音、转写、笔记和设置吗？此操作无法撤销。')) return;
     await clearLocalData();
+    recordsRef.current=[];
     setRecordings([]);
     setCourses([]);
     setActive(null);
@@ -1138,7 +1227,7 @@ function App() {
           <h1>开始一堂新的课堂记录</h1>
           <p className="page-intro">实时转写、中文理解和 AI Notes，都在同一个工作区。</p>
         </div>
-        <div className="privacy-chip"><Icon name="lock" /> 仅存本机</div>
+        <div className="privacy-chip"><Icon name="lock" /> 音频留本机</div>
       </header>
 
       <section className="start-hero" aria-labelledby="start-title">
@@ -1264,7 +1353,7 @@ function App() {
           </div>
           <button className="quick-bookmark" onClick={() => addBookmark()} disabled={active.status === 'idle'} title="收藏当前时刻"><Icon name="bookmark" /></button>
         </div>
-        {audioUrl && <audio ref={audioElementRef} src={audioUrl} onPlay={() => setAudioPlaying(true)} onPause={() => setAudioPlaying(false)} onEnded={() => setAudioPlaying(false)} onTimeUpdate={(event) => setElapsedMs(event.currentTarget.currentTime * 1000)} />}
+        {audioUrl && <audio ref={audioElementRef} src={audioUrl} onLoadedMetadata={(event)=>{if(pendingSeekRef.current!==null){event.currentTarget.currentTime=pendingSeekRef.current/1000;pendingSeekRef.current=null;void event.currentTarget.play().catch(()=>undefined);}}} onPlay={() => setAudioPlaying(true)} onPause={() => setAudioPlaying(false)} onEnded={() => setAudioPlaying(false)} onTimeUpdate={(event) => setElapsedMs(event.currentTarget.currentTime * 1000)} />}
       </section>
     );
     const modelStatusBar = showModelBar ? <div className={`model-bar state-${modelProgress.state}`} role="status">
@@ -1311,9 +1400,16 @@ function App() {
               <button className={inputSource === 'system' ? 'active' : ''} onClick={() => setInputSource('system')}><Icon name="monitor" /> 电脑声音</button>
             </div>
           )}
-          <span className="engine-label">实时：{speechRecognitionConstructor ? '浏览器字幕' : '课后本地转写'}</span>
+          <span className="engine-label">实时 Tiny · 课后 {settings.preciseModel==='base'?'Base 精校':'Tiny 快速'}</span>
         </section>
 
+        <div className="processing-actions" aria-label="音频处理">
+          <span>{active.analysisError || active.aiError || (jobBusy ? '正在处理，请保留页面…' : active.segments.length ? '文字已保存，可整理纪要或继续添加本堂课音频' : '录音结束后会自动转写；旧录音请点右侧按钮')}</span>
+          {active.audioBlob && !isCapturing && <button className="button primary" disabled={jobBusy||aiBusy} onClick={()=>void runPreciseTranscription()}>{active.segments.length?'重新转写并整理':'转写并生成笔记'}</button>}
+          {active.segments.length>0 && !isCapturing && <button className="button secondary" disabled={jobBusy||aiBusy} onClick={regenerateBrief}>生成 / 重试纪要</button>}
+          {!isCapturing && <button className="button secondary" disabled={jobBusy||aiBusy} onClick={()=>void appendToClass()}>追加本堂课音频</button>}
+          {(jobBusy||aiBusy)&&<button className="button secondary" onClick={()=>{cancelBatchRef.current=true;finalizeAbortRef.current?.abort();analysisAbortRef.current?.abort();aiAbortRef.current?.abort();setToast('已请求取消，已保存的数据保留');}}>取消处理</button>}
+        </div>
         {showTranscriptSearch && <div className="transcript-searchbar">
           <Icon name="search" />
           <input value={transcriptQuery} onChange={(event) => setTranscriptQuery(event.target.value)} placeholder="在原文、译文和讲者中查找…" autoFocus />
@@ -1333,7 +1429,7 @@ function App() {
                 <div className="transcript-empty">
                   <div className="empty-wave" aria-hidden="true">{DEFAULT_LEVELS.slice(0, 15).map((level, index) => <i key={index} style={{ height: `${18 + level * 72}%` }} />)}</div>
                   <h2>{active.status === 'complete' ? '这段音频还没有字幕' : active.recordingMode === 'zh' ? '中文声音会在这里变成课堂线索' : '声音会在这里变成双语线索'}</h2>
-                  <p>{active.status === 'complete' ? `点击“本地精确转写”，在设备上生成${active.recordingMode === 'zh' ? '中文课堂笔记' : '英文字幕和中文理解'}。` : inputSource === 'system' ? '系统声音会先完整录下，停止后可进行本地精确转写。' : active.recordingMode === 'zh' ? '开始后会显示中文原话，并同步捕捉作业、考点和老师强调。' : '开始后先显示英文原文，再逐段补上中文理解与 Key Messages。'}</p>
+                  <p>{active.status === 'complete' ? `点击“转写并生成笔记”，在设备上生成${active.recordingMode === 'zh' ? '中文课堂笔记' : '英文字幕和中文理解'}。` : inputSource === 'system' ? '系统声音会先完整录下，停止后可进行本地精确转写。' : active.recordingMode === 'zh' ? '开始后会显示中文原话，并同步捕捉作业、考点和老师强调。' : '开始后先显示英文原文，再逐段补上中文理解与 Key Messages。'}</p>
                   {active.status !== 'recording' && active.status !== 'paused' && !active.audioBlob && (
                     <button className="button soft" onClick={loadDemo}><Icon name="sparkles" /> 载入示例看看</button>
                   )}
@@ -1373,7 +1469,7 @@ function App() {
           <aside className="notes-card" aria-labelledby="notes-title">
             <div className="panel-heading compact">
               <div><p className="eyebrow">Focus Notes</p><h2 id="notes-title">AI 课堂助手</h2></div>
-              <button className="refresh-brief" onClick={regenerateBrief} disabled={!active.segments.length} title="按最新内容重新整理"><Icon name="sparkles" /></button>
+              <button className="refresh-brief" onClick={regenerateBrief} disabled={!active.segments.length || aiBusy || jobBusy} title="按最新内容重新整理"><Icon name="sparkles" /></button>
             </div>
             {isCapturing && <div className="mobile-capture-controls" role="status" aria-label="录音控制">
               <span><i className={active.status === 'recording' ? 'live' : ''} /><strong>{active.status === 'recording' ? '录音中' : '已暂停'}</strong><time>{formatClock(elapsedMs)}</time></span>
@@ -1390,9 +1486,18 @@ function App() {
               <button role="tab" aria-selected={notesTab === 'notes'} className={notesTab === 'notes' ? 'active' : ''} onClick={() => setNotesTab('notes')}>随手记 <b>{active.notes.length}</b></button>
             </div>
 
+            <div className="notes-scope">
+              <label>整理范围 <select aria-label="整理范围" value={summaryScope} disabled={aiBusy||jobBusy||isCapturing} onChange={event=>setSummaryScope(event.target.value as typeof summaryScope)}>
+                <option value="recording">这一段录音</option><option value="class">本堂课 · 多段录音</option><option value="course" disabled={!active.courseId||active.courseId===DEFAULT_COURSE_ID}>整门课程</option>
+              </select></label>
+              <span>{settings.aiProvider==='codex'?'Codex · Luna':'本地规则'}</span>
+            </div>
+            {aiBusy && <div className="ai-stream" role="status"><strong>Codex 正在整理…</strong><pre>{aiStream ? '已收到 '+aiStream.length+' 字符，正在验证来源与分类…' : '正在连接订阅模型…'}</pre></div>}
+            {assistantAnswer && <div className="assistant-answer"><strong>课堂问答</strong><p>{assistantAnswer}</p></div>}
+            {active.aiError && <div className="workflow-error" role="alert">{active.aiError} · 音频和文字已保留。</div>}
             {notesTab === 'keys' && <div className="focus-scroll">
               {active.keyMessages.map((message, index) => (
-                <button className={`key-message category-${message.category}`} key={message.id} onClick={() => seekTo(message.startMs)}>
+                <button className={`key-message category-${message.category}`} key={message.id} onClick={() => seekSource(message.startMs,message.sourceRecordingId)}>
                   <span className="key-index">{String(index + 1).padStart(2, '0')}</span>
                   <span className="key-copy"><small>{KEY_MESSAGE_LABELS[message.category]} · {formatClock(message.startMs)}</small><strong>{message.title}</strong></span>
                 </button>
@@ -1408,10 +1513,10 @@ function App() {
                   {briefSectionKeys.map((section) => (
                     <section className="brief-document-section" key={section}>
                       <h4>{BRIEF_SECTION_LABELS[section]} <b>{active.classBrief?.sections[section].length ?? 0}</b></h4>
-                      {active.classBrief?.sections[section].length ? <ul>{active.classBrief.sections[section].map((item) => <li key={item.id}><button onClick={() => seekTo(item.atMs)}><time>{formatClock(item.atMs)}</time><span>{item.text}</span></button></li>)}</ul> : <p className="brief-empty">本次暂未识别到相关内容</p>}
+                      {active.classBrief?.sections[section].length ? <ul>{active.classBrief.sections[section].map((item) => <li key={item.id}><button onClick={() => seekSource(item.atMs,item.sourceRecordingId)}><time>{formatClock(item.atMs)}</time><span>{item.text}{item.due && <small className="due-date">截止 / 时间：{item.due}</small>}</span></button></li>)}</ul> : <p className="brief-empty">本次暂未识别到相关内容</p>}
                     </section>
                   ))}
-                  <p className="brief-engine">由本地规则整理 · {new Date(active.classBrief.generatedAt).toLocaleString('zh-CN')}</p>
+                  <p className="brief-engine">{active.classBrief.engine==='codex'?'Codex · '+active.classBrief.model:'本地规则整理（非大模型）'} · {new Date(active.classBrief.generatedAt).toLocaleString('zh-CN')}</p>
                 </article>
               </> : <div className="notes-empty"><Icon name="note" /><p>{active.analysisStatus === 'transcribing' || active.analysisStatus === 'summarizing' ? '正在整理这堂课的分类纪要…' : '停止录音或导入音频后，会在这里生成总的课堂纪要。'}</p>{active.segments.length > 0 && <button className="button soft" onClick={regenerateBrief}>立即生成</button>}</div>}
             </div>}
@@ -1441,9 +1546,9 @@ function App() {
               </div>
               <div className="assistant-composer">
                 <textarea value={assistantPrompt} onChange={(event) => setAssistantPrompt(event.target.value)} placeholder="搜索或整理本课内容" onKeyDown={(event) => { if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); runAssistantPrompt(); } }} />
-                <div><button title="添加音频" onClick={() => chooseImportFiles(active.courseId === DEFAULT_COURSE_ID ? undefined : active.courseId)}><Icon name="paperclip" /></button><span>本地 Notes 助手</span><button className="assistant-send" onClick={() => runAssistantPrompt()} disabled={!assistantPrompt.trim()} title="整理"><Icon name="send" /></button></div>
+                <div><button title="添加音频" onClick={() => chooseImportFiles(active.courseId === DEFAULT_COURSE_ID ? undefined : active.courseId)}><Icon name="paperclip" /></button><span>{settings.aiProvider==='codex'?'Codex · ChatGPT 订阅':'本地规则助手'}</span><button className="assistant-send" onClick={() => runAssistantPrompt()} disabled={!assistantPrompt.trim()||aiBusy||jobBusy} title="整理"><Icon name="send" /></button></div>
               </div>
-              <small className="assistant-disclaimer">结果由本地转写与规则生成，请结合课堂原话核对。</small>
+              <small className="assistant-disclaimer">仅选定的转写文字发送至 Codex；请点击时间戳核对原话，日期不明时不要自行推断。</small>
             </div>
           </aside>
         </div>
@@ -1493,7 +1598,7 @@ function App() {
           {filteredRecordings.map((recording) => (
             <article className="library-row" key={recording.id}>
               <button className="library-title" onClick={() => openRecording(recording)}><span><Icon name="headphones" /></span><strong>{recording.title}</strong></button>
-              <span className="content-summary"><b>{recording.segments.length}</b> 片段 · <b>{recording.keyMessages.length}</b> 重点{recording.analysisStatus === 'queued' || recording.analysisStatus === 'transcribing' || recording.analysisStatus === 'summarizing' ? <em className="analysis-badge working">生成中</em> : recording.analysisStatus === 'error' ? <em className="analysis-badge error">需重试</em> : recording.analysisStatus === 'ready' ? <em className="analysis-badge ready">已整理</em> : null}</span>
+              <span className="content-summary"><b>{recording.segments.length}</b> 片段 · <b>{recording.keyMessages.length}</b> 重点{recording.aiError || recording.analysisError ? <em className="analysis-badge error">需重试</em> : recording.analysisStatus === 'queued' || recording.analysisStatus === 'transcribing' || recording.analysisStatus === 'summarizing' ? <em className="analysis-badge working">生成中</em> : recording.analysisStatus === 'error' ? <em className="analysis-badge error">需重试</em> : recording.analysisStatus === 'ready' ? <em className="analysis-badge ready">已整理</em> : null}</span>
               <time>{formatShortDate(recording.createdAt)}</time>
               <span className="duration">{formatClock(recording.durationMs)}</span>
               <span className="row-actions"><button onClick={() => openRecording(recording)} title="打开"><Icon name="arrow" /></button><button className="danger" onClick={() => void removeRecording(recording)} title="删除"><Icon name="trash" /></button></span>
@@ -1517,7 +1622,7 @@ function App() {
             <button className={settings.recordingMode === 'zh' ? 'selected' : ''} onClick={() => applyRecordingMode('zh')}><span className="radio-mark">{settings.recordingMode === 'zh' && <i />}</span><strong>中文课堂</strong><small>中文原话 + AI Notes</small></button>
           </div></div>
           <div className="setting-row"><div><strong>自动生成中文</strong><p>每个完整英文片段结束后自动翻译。</p></div><Toggle checked={settings.autoTranslate} onChange={(checked) => setSettings((value) => ({ ...value, autoTranslate: checked }))} label="自动生成中文" /></div>
-          <div className="setting-row"><div><strong>实时 Key Messages</strong><p>录音时用轻量规则识别作业、考点、概念和老师强调。</p></div><Toggle checked={settings.autoKeyMessages} onChange={(checked) => setSettings((value) => ({ ...value, autoKeyMessages: checked }))} label="实时 Key Messages" /></div>
+          <div className="setting-row"><div><strong>实时 Key Messages</strong><p>Codex 模式下按新增文字每约 30 秒整理一次；速度受订阅额度与网络影响。</p></div><Toggle checked={settings.autoKeyMessages} onChange={(checked) => setSettings((value) => ({ ...value, autoKeyMessages: checked }))} label="实时 Key Messages" /></div>
           <div className="setting-row"><div><strong>导入后自动生成笔记</strong><p>多段音频会依次转写；单条失败不会影响其他文件。</p></div><Toggle checked={settings.autoAnalyzeUploads} onChange={(checked) => setSettings((value) => ({ ...value, autoAnalyzeUploads: checked }))} label="导入后自动生成笔记" /></div>
           <div className="setting-stack"><div><strong>翻译引擎</strong><p>“自动”会优先使用浏览器内置模型，再降级到本地开源模型。</p></div><div className="choice-grid">
             {([
@@ -1535,20 +1640,23 @@ function App() {
         </section>
 
         <section className="settings-section api-section">
-          <div className="settings-heading"><span><Icon name="sparkles" /></span><div><h2>GPT API 评估</h2><p>先把必要性和隐私边界说清楚。</p></div></div>
-          <div className="api-verdict"><span><Icon name="check" /></span><div><small>当前结论</small><strong>现在不需要接入你的 GPT API</strong><p>中文/英文转写、Key Messages 和分类纪要都能在本机完成，不产生 API 费用，也不要求填写密钥。</p></div></div>
-          <div className="api-path"><div><b>本地模式 · 当前启用</b><p>Whisper + 轻量规则，适合课堂实时使用和基础分类。</p></div><div><b>GPT 增强 · 以后可选</b><p>适合更自然的长课总结、跨多段音频合并与行动项推理。若接入，必须由本地代理或后端读取 <code>OPENAI_API_KEY</code>，不会把密钥放进浏览器。</p></div></div>
+          <div className="settings-heading"><span><Icon name="sparkles" /></span><div><h2>Codex 订阅连接</h2><p>通过本机桥接服务使用 ChatGPT 登录，不需要 API Key。</p></div></div>
+          <div className="api-verdict"><span><Icon name={aiStatus.authenticated?'check':'warning'} /></span><div><small>{aiStatus.connected?'本机服务已连接':'本机服务未就绪'}</small><strong>{aiStatus.authenticated?'ChatGPT 已登录 · '+(aiStatus.planType??'订阅'):'需要检查服务或登录'}</strong><p>{aiStatus.message || 'Luna · low，笔记和问答消耗 Codex 订阅配额，不是 API 钱包余额。'}</p></div></div>
+          <div className="setting-row"><label>笔记引擎 <select aria-label="笔记引擎" value={settings.aiProvider} disabled={aiBusy||jobBusy} onChange={event=>setSettings(value=>({...value,aiProvider:event.target.value as 'codex'|'local',aiProviderConfigured:true}))}><option value="codex">Codex · ChatGPT 订阅</option><option value="local">本地规则 · 非大模型</option></select></label><button className="button secondary" onClick={()=>void refreshCodex()}>检查连接</button><button className="button primary" onClick={()=>void connectCodex()} disabled={!aiStatus.connected}>ChatGPT 登录</button></div>
+          {aiStatus.rateLimits?.map((limit,index)=><p key={index}>{limit.name}：剩余 {Math.round(limit.remainingPercent)}%{limit.resetsAt?' · 重置 '+new Date(limit.resetsAt*1000).toLocaleString('zh-CN'):''}</p>)}
+          <p className="privacy-note">音频在本机进行识别和翻译；启用 Codex 时，选定的转写文字会发送至 OpenAI。网站保存纪要，不会把临时 AI 会话伪装成桌面任务栏的镜像。断网或额度耗尽时保留资料并提示重试。</p>
         </section>
 
         <section className="settings-section">
           <div className="settings-heading"><span><Icon name="lock" /></span><div><h2>数据与设备</h2><p>录音、转写和笔记保存在浏览器的本地数据库。</p></div></div>
           <div className="capability-grid">
             <div className={recordingSupported ? 'ok' : 'warn'}><Icon name={recordingSupported ? 'check' : 'warning'} /><span><strong>录音能力</strong><small>{recordingSupported ? '可用' : '不可用'}</small></span></div>
-            <div className={speechRecognitionConstructor ? 'ok' : 'warn'}><Icon name={speechRecognitionConstructor ? 'check' : 'warning'} /><span><strong>实时字幕</strong><small>{speechRecognitionConstructor ? '可用' : '仅课后转写'}</small></span></div>
+            <div className={speechRecognitionConstructor ? 'ok' : 'warn'}><Icon name={speechRecognitionConstructor ? 'check' : 'warning'} /><span><strong>本机实时转写</strong><small>Whisper · 首次需下载模型</small></span></div>
             <div className={webGpuAvailable ? 'ok' : 'neutral'}><Icon name={webGpuAvailable ? 'check' : 'warning'} /><span><strong>WebGPU</strong><small>{webGpuAvailable ? '可用' : '使用 WASM'}</small></span></div>
           </div>
-          <div className="privacy-note"><Icon name="lock" /><div><strong>关于“本地优先”</strong><p>录音和笔记不会上传到听澜服务器，因为这个版本没有服务器。浏览器实时字幕是否联网由 Edge/Chrome 自身决定；若你需要全程离线，请录完后使用本地 Whisper 精确转写。</p></div></div>
+          <div className="privacy-note"><Icon name="lock" /><div><strong>关于“本地优先”</strong><p>录音、字幕和笔记默认保存在当前浏览器。Codex 模式只发送选定转写文字至 OpenAI。清除浏览器数据会丢失本机资料，请定期导出完整备份。</p></div></div>
           <div className="setting-row"><div><strong>安装为桌面应用</strong><p>获得独立窗口和更像原生应用的使用方式。</p></div><button className="button secondary" onClick={() => void installApp()}>安装应用</button></div>
+          <div className="setting-row"><div><strong>完整备份 / 恢复</strong><p>包含录音、课程与笔记；文件未加密，请私下保管。恢复不覆盖已有资料。</p></div><button className="button secondary" disabled={jobBusy||aiBusy} onClick={()=>void backupLocalData().catch(error=>setToast(String(error)))}>导出完整备份</button><button className="button secondary" disabled={jobBusy||aiBusy} onClick={()=>backupInputRef.current?.click()}>恢复备份</button></div>
           <div className="setting-row danger-row"><div><strong>清除所有本地数据</strong><p>永久删除录音、字幕、笔记和偏好。</p></div><button className="button danger-button" onClick={() => void clearEverything()}><Icon name="trash" /> 全部清除</button></div>
         </section>
       </div>
@@ -1578,18 +1686,22 @@ function App() {
           <button onClick={() => { chooseImportFiles(); setSidebarOpen(false); }}><Icon name="upload" /> 批量导入</button>
         </div>
         <div className="sidebar-bottom">
-          <div className="local-card"><Icon name="lock" /><div><strong>Local first</strong><small>内容留在这台设备</small></div><span className="online-dot" /></div>
-          <p>听澜 0.2 · Focus Notes</p>
+          <div className="local-card"><Icon name="lock" /><div><strong>Local first</strong><small>音频留在本机 · 文字可送 Codex</small></div><span className="online-dot" /></div>
+          <p>听澜 0.3 · Codex Notes</p>
         </div>
       </aside>
       {sidebarOpen && <button className="sidebar-backdrop" onClick={() => setSidebarOpen(false)} aria-label="关闭导航菜单" />}
 
       <div className="content-shell">
+      {importRunningRef.current && <div className="processing-actions"><span>批量音频处理进行中；已导入的音频已保存在本机。</span><button className="button secondary" onClick={()=>{cancelBatchRef.current=true;finalizeAbortRef.current?.abort();analysisAbortRef.current?.abort();aiAbortRef.current?.abort();}}>取消批量处理</button></div>}
+      <div className="connection-strip" role="status"><span className={aiStatus.authenticated?'connected':'disconnected'} />{settings.aiProvider==='codex'?(aiStatus.authenticated?'Codex 已连接 · Luna · ChatGPT 订阅':'Codex 未就绪 · 录音可保存，笔记需要连接'):'本地规则模式 · 非大模型'}<button onClick={()=>{setPage('settings');void refreshCodex();}}>连接设置</button><small>恢复版 0.3</small></div>
+
         {!hydrated ? (
           <main id="main-content" className="loading-screen"><span className="loading-mark"><i /><i /><i /><i /></span><p>正在打开你的本地资料库…</p></main>
         ) : page === 'home' ? renderHome() : page === 'recorder' ? renderRecorder() : page === 'library' ? renderLibrary() : renderSettings()}
       </div>
 
+      <input ref={backupInputRef} type="file" accept=".json,application/json" hidden onChange={event=>{const file=event.target.files?.[0];if(file)void restoreBackup(file);event.currentTarget.value='';}} />
       <input ref={fileInputRef} type="file" multiple accept="audio/*,.mp3,.m4a,.wav,.webm,.ogg,.mp4" hidden onChange={(event) => { const files = Array.from(event.target.files ?? []); if (files.length) void handleAudioImport(files); event.currentTarget.value = ''; }} />
       {editingSegment && (
         <div className="modal-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) setEditingSegment(null); }}>

@@ -22,9 +22,9 @@ A task file owns exactly one workstream. It records the recommended branch, scop
 
 `claim` creates a JSON lease atomically in the shared Git common directory. A lease records task, owner, branch, worktree, base SHA, scope, permitted paths, ports, and expiry.
 
-- Same-scope active leases conflict, except integration.
+- Same-scope or overlapping-path active leases conflict, including integration. Integration work has an explicit narrow path scope so disjoint runtime, bridge and storage tasks can proceed in parallel.
 - Integration-only files require the `integration` scope or a separately planned integration task.
-- Renew a long task before expiry.
+- Renew a long task before expiry. To recover your own expired lease in its original branch/worktree (even if dirty), run `renew -TaskId ID -Owner ORIGINAL_OWNER -Reason "resume interrupted task"`. Renewal uses a mutex, rechecks active overlaps and validates a 15–1440 minute TTL; it cannot displace another active owner.
 - An active lease cannot be broken.
 - An expired lease may be broken only after the recorded worktree is clean or unavailable and a reason is supplied.
 
@@ -33,6 +33,8 @@ A task file owns exactly one workstream. It records the recommended branch, scop
 `sync` refuses dirty worktrees. With `-Apply`, it merges current local `main` into the task branch. On conflict it aborts the merge and preserves the pre-sync tree. The task owner resolves the conflict in a separate explicit step.
 
 No background watcher may modify source files. Automatic synchronization means automatic discovery of commits and ready refs plus safe-boundary synchronization—not hot-merging into an active editor.
+
+For this installation, each coordination event/status refresh atomically mirrors accepted main, ready refs and leases into `C:/Users/HP/Documents/vibe Coding/Tinglan/LIVE_STATUS.json`. It is metadata, not another code checkout. The canonical Git common path guard prevents isolated test clones from writing that journal. Source updates still require publish, integration and a clean-boundary sync. The integration task must not edit another active task's JSON; only its owner and main's integrate operation update that record.
 
 ## Publication
 

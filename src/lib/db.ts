@@ -78,7 +78,7 @@ function normalizeRecording(value: RecordingSession | Record<string, unknown>): 
 }
 
 function normalizeSettings(value?: LegacySettings): AppSettings {
-  const preciseModel = value?.preciseModel === 'base' || value?.preciseModel === 'base-en' ? 'base' : 'tiny';
+  const preciseModel = value?.preciseModel === 'tiny' || value?.preciseModel === 'tiny-en' ? 'tiny' : 'base';
   const recordingMode: RecordingMode =
     value?.recordingMode === 'zh' || value?.sourceLanguage?.toLowerCase().startsWith('zh') ? 'zh' : 'en-zh';
   return {
@@ -92,7 +92,10 @@ function normalizeSettings(value?: LegacySettings): AppSettings {
           : 'zh-CN'
         : value?.sourceLanguage ?? DEFAULT_SETTINGS.sourceLanguage,
     preciseModel,
-    aiProvider: 'local',
+    // Older builds hard-coded local mode. This release adopts the user's chosen subscription route;
+    // later explicit local-mode selections are retained.
+    aiProvider: value?.aiProviderConfigured && value.aiProvider === 'local' ? 'local' : 'codex',
+    aiProviderConfigured: true,
   };
 }
 
@@ -235,7 +238,11 @@ export async function saveCourse(course: Course): Promise<void> {
   db.close();
 }
 
-export async function deleteCourse(id: string): Promise<void> {
+export function deleteCourse(id: string): Promise<void> {
+  return queueRecordingWrite(()=>deleteCourseNow(id));
+}
+
+async function deleteCourseNow(id: string): Promise<void> {
   if (id === DEFAULT_COURSE_ID) throw new Error('默认的“未分组”课程不能删除');
   const db = await openDatabase();
   const transaction = db.transaction([COURSES, RECORDINGS], 'readwrite');
@@ -278,7 +285,19 @@ export async function getRecording(id: string): Promise<RecordingSession | undef
   return item ? normalizeRecording(item as RecordingSession) : undefined;
 }
 
-export async function saveRecording(recording: RecordingSession): Promise<void> {
+let recordingWrites: Promise<void> = Promise.resolve();
+function queueRecordingWrite(operation:()=>Promise<void>):Promise<void>{
+  const pending=recordingWrites.then(operation);
+  recordingWrites=pending.catch(()=>undefined);
+  return pending;
+}
+export function saveRecording(recording: RecordingSession): Promise<void> {
+  // Snapshot at invocation and serialize writes so an older auto-save cannot finish after a newer stage.
+  const snapshot = structuredClone(recording);
+  return queueRecordingWrite(() => writeRecording(snapshot));
+}
+
+async function writeRecording(recording: RecordingSession): Promise<void> {
   const db = await openDatabase();
   const transaction = db.transaction(RECORDINGS, 'readwrite');
   transaction.objectStore(RECORDINGS).put(normalizeRecording(recording));
@@ -286,7 +305,11 @@ export async function saveRecording(recording: RecordingSession): Promise<void> 
   db.close();
 }
 
-export async function deleteRecording(id: string): Promise<void> {
+export function deleteRecording(id: string): Promise<void> {
+  return queueRecordingWrite(()=>deleteRecordingNow(id));
+}
+
+async function deleteRecordingNow(id: string): Promise<void> {
   const db = await openDatabase();
   const transaction = db.transaction(RECORDINGS, 'readwrite');
   transaction.objectStore(RECORDINGS).delete(id);
@@ -312,7 +335,11 @@ export async function saveSettings(settings: AppSettings): Promise<void> {
   db.close();
 }
 
-export async function clearLocalData(): Promise<void> {
+export function clearLocalData(): Promise<void> {
+  return queueRecordingWrite(clearLocalDataNow);
+}
+
+async function clearLocalDataNow(): Promise<void> {
   const db = await openDatabase();
   const transaction = db.transaction([RECORDINGS, SETTINGS, COURSES], 'readwrite');
   transaction.objectStore(RECORDINGS).clear();
