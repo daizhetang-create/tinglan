@@ -312,7 +312,9 @@ function App() {
     if (!hydrated || !active) return;
     if (saveTimerRef.current) window.clearTimeout(saveTimerRef.current);
     saveTimerRef.current = window.setTimeout(() => {
-      const snapshot = { ...active, updatedAt: new Date().toISOString() };
+      const latest = activeRef.current;
+      if (!latest || latest.id !== active.id) return;
+      const snapshot = { ...latest, updatedAt: new Date().toISOString() };
       saveRecording(snapshot)
         .then(() => setRecordings((items) => upsertRecording(items, snapshot)))
         .catch(() => setToast('本地自动保存失败'));
@@ -399,10 +401,10 @@ function App() {
 
   const persistRecording = useCallback(async(recording:RecordingSession) => {
     const next={...recording,updatedAt:new Date().toISOString()};
-    await saveRecording(next);
     recordsRef.current=upsertRecording(recordsRef.current,next);
     setRecordings(items=>upsertRecording(items,next));
     if(activeRef.current?.id===next.id){activeRef.current=next;setActive(next);}
+    await saveRecording(next);
     return next;
   },[]);
 
@@ -737,7 +739,8 @@ function App() {
     setToast('示例已载入，可以体验编辑、笔记与导出');
   }, [settings]);
 
-  const generateNotes = useCallback(async(recording:RecordingSession, scope:'recording'|'class'|'course'='recording', prompt?:string) => {
+  const generateNotes = useCallback(async(recording:RecordingSession, scope:'recording'|'class'|'course'='recording', prompt?:string, parentSignal?:AbortSignal) => {
+    parentSignal?.throwIfAborted();
     if(aiJobRef.current)throw new Error('Codex 正在处理，请稍后重试');
     const all=upsertRecording(recordsRef.current,recording);
     const sources=(scope==='course' && recording.courseId && recording.courseId!==DEFAULT_COURSE_ID
@@ -746,6 +749,8 @@ function App() {
       .filter(item=>item.segments.length).sort((a,b)=>a.createdAt.localeCompare(b.createdAt));
     if(!sources.length)throw new Error('需要先有转写文字，才能生成纪要');
     const controller=new AbortController();
+    const abortFromParent=()=>controller.abort();
+    parentSignal?.addEventListener('abort',abortFromParent,{once:true});
     aiAbortRef.current=controller;aiJobRef.current=true;setAiBusy(true);setAiStream('');setAssistantAnswer('');
     try {
       const result=await generateCodexNotes(sources,prompt,text=>setAiStream(value=>(value+text).slice(-12000)),controller.signal);
@@ -765,38 +770,47 @@ function App() {
       const latest=activeRef.current?.id===recording.id?activeRef.current:recording;
       await persistRecording({...latest,aiError:message});
       throw error;
-    } finally {aiJobRef.current=false;setAiBusy(false);aiAbortRef.current=null;}
+    } finally {parentSignal?.removeEventListener('abort',abortFromParent);aiJobRef.current=false;setAiBusy(false);aiAbortRef.current=null;}
   },[persistRecording,settings.summaryTemplate]);
 
   const analyzeRecording = useCallback(async (recording: RecordingSession, reuseTranscript=false): Promise<RecordingSession> => {
     if(analysisAbortRef.current)throw new Error('已有转写任务正在处理，请等待或取消');
     const controller=new AbortController();analysisAbortRef.current=controller;setJobBusy(true);
-    let working={...recording,analysisStatus:'transcribing' as RecordingSession['analysisStatus'],analysisError:undefined};
+    let working:RecordingSession={...recording,analysisStatus:'transcribing',analysisError:undefined};
+    const saveStage=async(patch:Partial<RecordingSession>)=>{
+      const latest=activeRef.current?.id===recording.id?activeRef.current:(recordsRef.current.find(item=>item.id===recording.id)??working);
+      return persistRecording({...latest,...patch});
+    };
     try {
-      working=await persistRecording(working);
+      working=await saveStage({analysisStatus:'transcribing',analysisError:undefined,aiError:undefined});
+      controller.signal.throwIfAborted();
       const segments=reuseTranscript&&working.segments.length?working.segments:await transcribeRecording(working,settings.preciseModel,setPreciseProgress,controller.signal);
-      working=await persistRecording({...working,segments,analysisStatus:'summarizing'});
+      controller.signal.throwIfAborted();
+      working=await saveStage({segments,analysisStatus:'summarizing'});
       let translationError='';
       if(working.recordingMode==='en-zh'&&settings.autoTranslate) {
         for(const segment of working.segments) {
           if(controller.signal.aborted)throw new Error('已取消，音频和文字已保留');
           if(segment.translation)continue;
           setPreciseProgress({label:'正在生成中文翻译',state:'working'});
-          try {segment.translation=await translationServiceRef.current?.translate(segment.source)??'';}
+          try {segment.translation=await translationServiceRef.current?.translate(segment.source)??'';controller.signal.throwIfAborted();}
           catch(error){translationError=error instanceof Error?error.message:'中文翻译未完成';break;}
-          working=await persistRecording({...working,segments:[...working.segments]});
+          working=await saveStage({segments:[...working.segments]});
         }
       }
-      working=await persistRecording({...enrichWithFocusNotes(working,settings.summaryTemplate,true),analysisStatus:'ready',analysisError:translationError||undefined});
+      controller.signal.throwIfAborted();
+      const local=enrichWithFocusNotes(working,settings.summaryTemplate,true);
+      working=await saveStage({keyMessages:local.keyMessages,classBrief:local.classBrief,analysisStatus:'ready',analysisError:translationError||undefined});
+      controller.signal.throwIfAborted();
       if(settings.aiProvider==='codex') {
-        try {working=await generateNotes(working,working.batchId?'class':'recording');}
+        try {working=await generateNotes(working,working.batchId?'class':'recording',undefined,controller.signal);}
         catch(error){working={...working,aiError:error instanceof Error?error.message:'Codex 未完成'};}
       }
       setPreciseProgress({label:working.aiError?'文字已保存；Codex 纪要未完成，可重试':translationError?'文字和笔记已保存；中文翻译未完成':'转写与分类笔记已保存',state:working.aiError||translationError?'error':'ready',progress:100});
       return working;
     } catch(error) {
       const message=error instanceof Error?error.message:'转写失败';
-      await persistRecording({...working,analysisStatus:'error',analysisError:message});
+      await saveStage({analysisStatus:'error',analysisError:message});
       setPreciseProgress({label:message,state:'error'});
       throw error;
     } finally {analysisAbortRef.current=null;setJobBusy(false);}
@@ -804,7 +818,7 @@ function App() {
 
   onRecordedRef.current=async recording=>{
     const finished=await analyzeRecording(recording,!liveFailedRef.current);
-    setRuntimeNotice(finished.aiError?'录音和文字已保存；AI 纪要失败，可单独重试':'录音、文字和笔记已保存');
+    setRuntimeNotice(finished.aiError||finished.analysisError||'录音、文字和笔记已保存');
   };
 
   useEffect(()=>{
@@ -1025,6 +1039,7 @@ function App() {
 
   const saveSegmentEdit = useCallback(() => {
     if (!editingSegment || !editSource.trim()) return;
+    if(jobBusy||aiBusy){setToast('请在处理结束后编辑原文，避免纪要引用失效');return;}
     updateActive((recording) => ({
       ...recording,
       segments: recording.segments.map((item) =>

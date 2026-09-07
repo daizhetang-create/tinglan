@@ -278,7 +278,16 @@ export async function getRecording(id: string): Promise<RecordingSession | undef
   return item ? normalizeRecording(item as RecordingSession) : undefined;
 }
 
-export async function saveRecording(recording: RecordingSession): Promise<void> {
+let recordingWrites: Promise<void> = Promise.resolve();
+export function saveRecording(recording: RecordingSession): Promise<void> {
+  // Snapshot at invocation and serialize writes so an older auto-save cannot finish after a newer stage.
+  const snapshot = structuredClone(recording);
+  const pending = recordingWrites.then(() => writeRecording(snapshot));
+  recordingWrites = pending.catch(() => undefined);
+  return pending;
+}
+
+async function writeRecording(recording: RecordingSession): Promise<void> {
   const db = await openDatabase();
   const transaction = db.transaction(RECORDINGS, 'readwrite');
   transaction.objectStore(RECORDINGS).put(normalizeRecording(recording));

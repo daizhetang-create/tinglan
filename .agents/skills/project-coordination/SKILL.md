@@ -16,6 +16,8 @@ Keep `main` as the only accepted product state. A conversation, copied folder, o
 4. Run `npm run coord -- claim -TaskId <ID> -Scope <scope>` before editing. Use the scope declared by the task; do not broaden it silently.
 5. Run `npm run coord -- sync -TaskId <ID> -Apply` only at a clean worktree boundary. Re-run `status` at the start of each new user turn or after another workstream is integrated.
 
+Coordination events and `status` automatically update the local shared journal at `C:/Users/HP/Documents/vibe Coding/Tinglan/LIVE_STATUS.json`. This is a status mirror, not a second source-code directory. Read its accepted main/ready refs; do not copy source folders between chats. To resume an expired lease, read the recovery section in the protocol and renew as the original owner; never bypass the lease hook.
+
 The claim output provides a worktree-specific dev port. Start Vite with `npm run dev -- --port <port>` so parallel previews do not collide.
 
 ## Complete and publish
