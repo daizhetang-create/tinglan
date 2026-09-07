@@ -129,7 +129,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   sourceLanguage: 'en-US',
   targetLanguage: 'zh-CN',
   translationPreference: 'auto',
-  preciseModel: 'tiny',
+  preciseModel: 'base',
   summaryTemplate: 'standard',
   aiProvider: 'codex',
 };

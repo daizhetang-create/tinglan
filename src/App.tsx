@@ -242,7 +242,6 @@ function App() {
   const audioElementRef = useRef<HTMLAudioElement | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const importCourseRef = useRef<string | undefined>(undefined);
-  const saveTimerRef = useRef<number | null>(null);
 
   const speechRecognitionConstructor = useMemo(() => {
     const browserWindow = window as typeof window & {
@@ -314,18 +313,11 @@ function App() {
 
   useEffect(() => {
     if (!hydrated || !active) return;
-    if (saveTimerRef.current) window.clearTimeout(saveTimerRef.current);
-    saveTimerRef.current = window.setTimeout(() => {
-      const latest = activeRef.current;
-      if (!latest || latest.id !== active.id) return;
-      const snapshot = { ...latest, updatedAt: new Date().toISOString() };
-      saveRecording(snapshot)
-        .then(() => setRecordings((items) => upsertRecording(items, snapshot)))
-        .catch(() => setToast('本地自动保存失败'));
-    }, 450);
-    return () => {
-      if (saveTimerRef.current) window.clearTimeout(saveTimerRef.current);
-    };
+    const latest = activeRef.current;
+    if (!latest || latest.id !== active.id) return;
+    // Queue immediately; navigation must not discard an outstanding debounced edit.
+    // Completion only reports failures, never writes an older snapshot back to React.
+    saveRecording(latest).catch(() => setToast('本地自动保存失败'));
   }, [active, hydrated]);
 
   useEffect(() => {
@@ -398,8 +390,12 @@ function App() {
 
   const updateActive = useCallback((updater: (recording: RecordingSession) => RecordingSession) => {
     if (!activeRef.current) return;
-    const next=updater(activeRef.current);
+    const next={...updater(activeRef.current),updatedAt:new Date().toISOString()};
     activeRef.current=next;
+    recordsRef.current=upsertRecording(recordsRef.current,next);
+    setRecordings(items=>upsertRecording(items,next));
+    // Enqueue before another click can switch active records in the same render batch.
+    void saveRecording(next).catch(()=>setToast('本地自动保存失败'));
     setActive(next);
   }, []);
 
@@ -635,7 +631,7 @@ function App() {
       liveFailedRef.current=false;
       liveAiAtRef.current=0;
       const live = new LiveTranscriber({
-        sourceLanguage:current.sourceLanguage,model:settings.preciseModel,
+        sourceLanguage:current.sourceLanguage,model:'tiny',
         onSegments:(segments)=>{
           if(activeRef.current?.id!==recordingId)return;
           updateActive(recording=>({...recording,segments:[...recording.segments,...segments],keyMessages:settings.aiProvider==='local'?extractKeyMessages([...recording.segments,...segments]):recording.keyMessages}));
@@ -751,7 +747,7 @@ function App() {
     setToast('示例已载入，可以体验编辑、笔记与导出');
   }, [settings]);
 
-  const generateNotes = useCallback(async(recording:RecordingSession, scope:'recording'|'class'|'course'='recording', prompt?:string, parentSignal?:AbortSignal) => {
+  const generateNotes = useCallback(async(recording:RecordingSession, scope:'recording'|'class'|'course'='recording', prompt?:string, parentSignal?:AbortSignal, answerOnly=false) => {
     parentSignal?.throwIfAborted();
     if(aiJobRef.current)throw new Error('Codex 正在处理，请稍后重试');
     const all=upsertRecording(recordsRef.current,recording);
@@ -770,7 +766,14 @@ function App() {
       const mapping={concept:'concepts',emphasis:'takeaways',assignment:'assignments',exam:'examReading',question:'followUps',admin:'followUps'} as const;
       result.items.forEach((item,index)=>sections[mapping[item.category]].push({id:'ai-'+index+'-'+item.sourceSegmentId,text:item.text,atMs:item.atMs,sourceSegmentId:item.sourceSegmentId,sourceRecordingId:item.sourceRecordingId,due:item.due}));
       const latest=activeRef.current?.id===recording.id?activeRef.current:(recordsRef.current.find(item=>item.id===recording.id)??recording);
-      const finished:RecordingSession={...latest,aiError:undefined,summaryScope:scope,
+      // A focused question must not replace the saved, comprehensive classroom summary.
+      if(answerOnly){
+        const preserved=await persistRecording({...latest,aiError:undefined});
+        setAssistantAnswer(result.answer||result.overview);
+        setAiStream('');setNotesTab('brief');
+        return preserved;
+      }
+      const finished:RecordingSession={...latest,analysisStatus:latest.status==='recording'||latest.status==='paused'?latest.analysisStatus:'ready',aiError:undefined,summaryScope:scope,
         keyMessages:result.items.map((item,index)=>({id:'ai-key-'+index,category:item.category,title:item.text,detail:item.text,startMs:item.atMs,endMs:item.atMs,sourceSegmentId:item.sourceSegmentId,sourceRecordingId:item.sourceRecordingId,score:10})),
         classBrief:{overview:result.overview,sections,generatedAt:result.generatedAt,engine:'codex',model:result.model,threadId:result.threadId,sourceSegmentCount:sources.reduce((sum,item)=>sum+item.segments.length,0),template:settings.summaryTemplate}};
       await persistRecording(finished);
@@ -778,10 +781,10 @@ function App() {
       setAiStream('');setNotesTab('brief');
       return finished;
     } catch(error) {
-      const message=error instanceof Error?error.message:'Codex 生成失败';
-      const latest=activeRef.current?.id===recording.id?activeRef.current:recording;
-      await persistRecording({...latest,aiError:message});
-      throw error;
+      const message=controller.signal.aborted?'已取消 AI 整理，录音和文字已保留，可重试':error instanceof Error?error.message:'Codex 生成失败';
+      const latest=activeRef.current?.id===recording.id?activeRef.current:(recordsRef.current.find(item=>item.id===recording.id)??recording);
+      await persistRecording({...latest,aiError:message,analysisStatus:latest.status==='recording'||latest.status==='paused'?latest.analysisStatus:'error'});
+      throw new Error(message);
     } finally {parentSignal?.removeEventListener('abort',abortFromParent);aiJobRef.current=false;setAiBusy(false);aiAbortRef.current=null;}
   },[persistRecording,settings.summaryTemplate]);
 
@@ -812,7 +815,7 @@ function App() {
       }
       controller.signal.throwIfAborted();
       const local=enrichWithFocusNotes(working,settings.summaryTemplate,true);
-      working=await saveStage({keyMessages:local.keyMessages,classBrief:local.classBrief,analysisStatus:'ready',analysisError:translationError||undefined});
+      working=await saveStage({keyMessages:local.keyMessages,classBrief:local.classBrief,analysisStatus:settings.aiProvider==='codex'?'summarizing':'ready',analysisError:translationError||undefined});
       controller.signal.throwIfAborted();
       if(settings.aiProvider==='codex') {
         try {working=await generateNotes(working,working.batchId?'class':'recording',undefined,controller.signal);}
@@ -821,10 +824,10 @@ function App() {
       setPreciseProgress({label:working.aiError?'文字已保存；Codex 纪要未完成，可重试':translationError?'文字和笔记已保存；中文翻译未完成':'转写与分类笔记已保存',state:working.aiError||translationError?'error':'ready',progress:100});
       return working;
     } catch(error) {
-      const message=error instanceof Error?error.message:'转写失败';
+      const message=controller.signal.aborted?'已取消处理，音频和已生成的文字已保留':error instanceof Error?error.message:'转写失败';
       await saveStage({analysisStatus:'error',analysisError:message});
       setPreciseProgress({label:message,state:'error'});
-      throw error;
+      throw new Error(message);
     } finally {analysisAbortRef.current=null;setJobBusy(false);}
   },[persistRecording,settings.autoTranslate,settings.preciseModel,settings.summaryTemplate,settings.aiProvider,generateNotes]);
 
@@ -895,7 +898,7 @@ function App() {
         setBatchProgress((current) => current ? { ...current, completed: Math.min(current.total, current.completed + 1) } : current);
       }
     }
-    setBatchProgress((current) => current ? { ...current, completed: current.total, currentName: '批量处理完成' } : current);
+    setBatchProgress((current) => current ? { ...current, completed: current.total, currentName: cancelBatchRef.current?'批量处理已取消':'批量处理完成' } : current);
     window.setTimeout(() => setBatchProgress(null), 4500);
     setToast(`${imported.length} 段音频已保存${processingFailures ? `，${processingFailures} 段处理未完成，请打开重试` : settings.autoAnalyzeUploads ? '，笔记处理已完成' : ''}`);
     importBatchRef.current=undefined;
@@ -999,7 +1002,8 @@ function App() {
     const recording=activeRef.current;
     if(!recording?.segments.length){setToast('请先转写，再生成纪要或提问');return;}
     if(settings.aiProvider==='local'){regenerateBrief();setToast('当前是本地规则模式；切换 Codex 后可智能问答');return;}
-    void generateNotes(recording,summaryScope,prompt||undefined)
+    const answerOnly=Boolean(prompt && suggestion!=='生成总纪要');
+    void generateNotes(recording,summaryScope,prompt||undefined,undefined,answerOnly)
       .then(()=>setAssistantPrompt('')).catch(error=>setToast(error instanceof Error?error.message:'Codex 请求失败'));
   },[assistantPrompt,generateNotes,regenerateBrief,settings.aiProvider,summaryScope]);
 
@@ -1073,8 +1077,10 @@ function App() {
   }, [editSource, editTranslation, editingSegment, updateActive]);
 
   const removeRecording = useCallback(async (recording: RecordingSession) => {
+    if(finalizingRef.current||importRunningRef.current||analysisAbortRef.current||aiJobRef.current||activeRef.current?.status==='recording'||activeRef.current?.status==='paused'){setToast('请先停止录音并完成或取消当前处理，再删除资料');return;}
     if (!window.confirm(`确定删除“${recording.title}”及其本地音频吗？此操作无法撤销。`)) return;
     await deleteRecording(recording.id);
+    recordsRef.current=recordsRef.current.filter(item=>item.id!==recording.id);
     setRecordings((items) => items.filter((item) => item.id !== recording.id));
     if (activeRef.current?.id === recording.id) {
       activeRef.current = null;
@@ -1106,16 +1112,17 @@ function App() {
   }, [courseName, courseTerm, courses.length]);
 
   const removeCourse = useCallback(async (course: Course) => {
+    if(finalizingRef.current||importRunningRef.current||analysisAbortRef.current||aiJobRef.current||activeRef.current?.status==='recording'||activeRef.current?.status==='paused'){setToast('请先停止录音并完成或取消当前处理，再删除分组');return;}
     if (!window.confirm(`删除课程分组“${course.name}”？录音会保留并移到“未分组”。`)) return;
     await deleteCourse(course.id);
-    const affected = recordings.filter((recording) => recording.courseId === course.id);
-    await Promise.all(affected.map((recording) => saveRecording({ ...recording, courseId: undefined })));
+    // deleteCourse atomically moves all records to the default group in IndexedDB.
+    recordsRef.current=recordsRef.current.map(recording=>recording.courseId===course.id?{...recording,courseId:DEFAULT_COURSE_ID}:recording);
     setCourses((items) => items.filter((item) => item.id !== course.id));
-    setRecordings((items) => items.map((recording) => recording.courseId === course.id ? { ...recording, courseId: undefined } : recording));
-    if (activeRef.current?.courseId === course.id) updateActive((recording) => ({ ...recording, courseId: undefined }));
+    setRecordings(recordsRef.current);
+    if (activeRef.current?.courseId === course.id) updateActive((recording) => ({ ...recording, courseId: DEFAULT_COURSE_ID }));
     if (courseFilter === course.id) setCourseFilter('all');
     setToast('课程分组已删除，录音仍然保留');
-  }, [courseFilter, recordings, updateActive]);
+  }, [courseFilter, updateActive]);
 
   const installApp = useCallback(async () => {
     if (!installPrompt) {
@@ -1129,8 +1136,10 @@ function App() {
   }, [installPrompt]);
 
   const clearEverything = useCallback(async () => {
+    if(finalizingRef.current||importRunningRef.current||analysisAbortRef.current||aiJobRef.current||activeRef.current?.status==='recording'||activeRef.current?.status==='paused'){setToast('请先停止录音并完成或取消当前处理，再清除资料');return;}
     if (!window.confirm('确定删除所有录音、转写、笔记和设置吗？此操作无法撤销。')) return;
     await clearLocalData();
+    recordsRef.current=[];
     setRecordings([]);
     setCourses([]);
     setActive(null);
@@ -1391,7 +1400,7 @@ function App() {
               <button className={inputSource === 'system' ? 'active' : ''} onClick={() => setInputSource('system')}><Icon name="monitor" /> 电脑声音</button>
             </div>
           )}
-          <span className="engine-label">Whisper 本机 · 语音分段更新</span>
+          <span className="engine-label">实时 Tiny · 课后 {settings.preciseModel==='base'?'Base 精校':'Tiny 快速'}</span>
         </section>
 
         <div className="processing-actions" aria-label="音频处理">
@@ -1589,7 +1598,7 @@ function App() {
           {filteredRecordings.map((recording) => (
             <article className="library-row" key={recording.id}>
               <button className="library-title" onClick={() => openRecording(recording)}><span><Icon name="headphones" /></span><strong>{recording.title}</strong></button>
-              <span className="content-summary"><b>{recording.segments.length}</b> 片段 · <b>{recording.keyMessages.length}</b> 重点{recording.analysisStatus === 'queued' || recording.analysisStatus === 'transcribing' || recording.analysisStatus === 'summarizing' ? <em className="analysis-badge working">生成中</em> : recording.analysisStatus === 'error' ? <em className="analysis-badge error">需重试</em> : recording.analysisStatus === 'ready' ? <em className="analysis-badge ready">已整理</em> : null}</span>
+              <span className="content-summary"><b>{recording.segments.length}</b> 片段 · <b>{recording.keyMessages.length}</b> 重点{recording.aiError || recording.analysisError ? <em className="analysis-badge error">需重试</em> : recording.analysisStatus === 'queued' || recording.analysisStatus === 'transcribing' || recording.analysisStatus === 'summarizing' ? <em className="analysis-badge working">生成中</em> : recording.analysisStatus === 'error' ? <em className="analysis-badge error">需重试</em> : recording.analysisStatus === 'ready' ? <em className="analysis-badge ready">已整理</em> : null}</span>
               <time>{formatShortDate(recording.createdAt)}</time>
               <span className="duration">{formatClock(recording.durationMs)}</span>
               <span className="row-actions"><button onClick={() => openRecording(recording)} title="打开"><Icon name="arrow" /></button><button className="danger" onClick={() => void removeRecording(recording)} title="删除"><Icon name="trash" /></button></span>
