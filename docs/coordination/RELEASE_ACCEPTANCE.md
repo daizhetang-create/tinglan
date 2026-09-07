@@ -35,7 +35,7 @@ The recovery uses verified fp32 WASM pipelines, a retained live worker and a com
 
 ## Verification boundaries
 
-No synthetic fixture results were added to the user's production 4318 database. No user recording was sent to Codex during these tests; all remote tests used explicitly synthetic transcript data.
+The tests above used isolated browser origins/databases. A packaged 4318 release check may briefly import a clearly identified synthetic fixture and remove only that test record afterward; it must not alter existing user recordings. No user recording was sent to Codex during these tests; all remote tests used explicitly synthetic transcript data.
 
 Not verified: physical microphone permission/acoustics, noisy lecture accuracy, 60–120 minute stress, suspend/resume, interrupted in-progress audio recovery, all browsers/devices, signed installer or automatic OS background processing. No “perfect” or numeric90 score is asserted.
 
