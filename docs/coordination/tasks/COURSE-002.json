@@ -3,7 +3,7 @@
   "id": "COURSE-002",
   "title": "Preserve legacy Chinese empty target language and empty titles in full backups",
   "priority": "P1",
-  "status": "active",
+  "status": "ready",
   "scope": "storage",
   "recommendedBranch": "codex/course-002",
   "dependsOn": [
@@ -21,7 +21,31 @@
     "Coordination doctor healthy; npm run check and npm run build passed; checkpoint COURSE-002 passed.",
     "node tests/notes/rules-smoke.mjs passed, including Chinese empty targetLanguage, empty recording title, exact binary Blob round-trip, English target validation and invalid-type rejection.",
     "Root CUA verified http://127.0.0.1:4524/tests/storage/backup-smoke.html: ALL 36 CHECKS PASSED, including Chinese empty targetLanguage and empty title through actual IndexedDB restore; English empty target/non-string values remain rejected. Isolated test database tinglan-backup-test-cfda43b6-c9f8-429d-92c9-6e133e2cdd22; no production data accessed.",
-    "Synchronized clean branch with main 4ff5862ee521b45091aa208a4da145b54161c3b6 before publication."
+    "Synchronized clean branch with main 4ff5862ee521b45091aa208a4da145b54161c3b6 before publication.",
+    "",
+    "> lectureflow-local@0.1.0 check",
+    "> tsc -b --pretty false",
+    "",
+    "",
+    "> lectureflow-local@0.1.0 build",
+    "> tsc -b && vite build",
+    "",
+    "vite v8.0.13 building client environment for production...",
+    "\u001b[2K",
+    "transforming...✓ 26 modules transformed.",
+    "rendering chunks...",
+    "computing gzip size...",
+    "dist/index.html                                                 0.78 kB │ gzip:     0.51 kB",
+    "dist/assets/translation.worker-DBk18nBN.js                    517.46 kB",
+    "dist/assets/transcription.worker-66MuyZzo.js                  518.99 kB",
+    "dist/assets/ort-wasm-simd-threaded.asyncify-DMmc6YqF.wasm  23,567.05 kB │ gzip: 5,824.05 kB",
+    "dist/assets/index-HkN7Hdrf.css                                108.88 kB │ gzip:    22.75 kB",
+    "dist/assets/index-ByfltKpP.js                                 283.11 kB │ gzip:    87.19 kB",
+    "",
+    "✓ built in 1.86s",
+    "npm run check: pass",
+    "npm run build: pass"
   ],
-  "updatedAt": "2026-09-07T16:46:05.1124870Z"
+  "updatedAt": "2026-09-07T17:01:51.4689098Z",
+  "resultSummary": "Legacy Chinese empty targetLanguage and empty title now round-trip; 36 real IndexedDB browser checks and Node/check/build pass."
 }
