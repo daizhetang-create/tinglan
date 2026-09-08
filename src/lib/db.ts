@@ -8,7 +8,9 @@ import {
 import { validateMaterial, type StudyMaterial } from '../features/study/types';
 
 const DB_NAME = 'tinglan-local';
-const DB_VERSION = 3;
+const DB_VERSION = 4;
+const CAPTURES = 'captureSessions';
+const CHUNKS = 'captureChunks';
 const RECORDINGS = 'recordings';
 const SETTINGS = 'settings';
 const COURSES = 'courses';
@@ -111,6 +113,7 @@ function transactionDone(transaction: IDBTransaction, fallback: string): Promise
 
 export function openDatabase(name = DB_NAME, seedDefaultCourse = true): Promise<IDBDatabase> {
   return new Promise((resolve, reject) => {
+    let blocked = false;
     const request = indexedDB.open(name, DB_VERSION);
 
     request.onupgradeneeded = (event) => {
@@ -160,6 +163,11 @@ export function openDatabase(name = DB_NAME, seedDefaultCourse = true): Promise<
         materials.createIndex('sha256', 'sha256');
       }
 
+      if (!db.objectStoreNames.contains(CAPTURES)) db.createObjectStore(CAPTURES, { keyPath: 'id' });
+      if (!db.objectStoreNames.contains(CHUNKS)) {
+        db.createObjectStore(CHUNKS, { keyPath: ['recordingId', 'sequence'] }).createIndex('recordingId', 'recordingId');
+      }
+
       if (event.oldVersion < 2) {
         if (seedDefaultCourse) coursesStore.put(defaultCourse(nowIso()));
         const cursorRequest = recordingsStore.openCursor();
@@ -180,10 +188,11 @@ export function openDatabase(name = DB_NAME, seedDefaultCourse = true): Promise<
 
     request.onsuccess = () => {
       const db = request.result;
+      if (blocked) { db.close(); return; }
       db.onversionchange = () => db.close();
       resolve(db);
     };
-    request.onblocked = () => reject(new Error('数据库升级被其他听澜窗口阻塞，请关闭其他窗口后重试'));
+    request.onblocked = () => { blocked = true; reject(new Error('数据库升级被其他听澜窗口阻塞，请关闭其他窗口后重试')); };
     request.onerror = () => reject(request.error ?? new Error('无法打开本地数据库'));
   });
 }
@@ -300,9 +309,9 @@ export async function getRecording(id: string): Promise<RecordingSession | undef
 }
 
 let recordingWrites: Promise<void> = Promise.resolve();
-function queueRecordingWrite(operation:()=>Promise<void>):Promise<void>{
+function queueRecordingWrite<T>(operation:()=>Promise<T>):Promise<T>{
   const pending=recordingWrites.then(operation);
-  recordingWrites=pending.catch(()=>undefined);
+  recordingWrites=pending.then(()=>undefined,()=>undefined);
   return pending;
 }
 export function saveRecording(recording: RecordingSession): Promise<void> {
@@ -319,14 +328,15 @@ async function writeRecording(recording: RecordingSession): Promise<void> {
   db.close();
 }
 
-export function deleteRecording(id: string): Promise<void> {
-  return queueRecordingWrite(()=>deleteRecordingNow(id));
+export function deleteRecording(id: string, name = DB_NAME): Promise<void> {
+  return queueRecordingWrite(()=>deleteRecordingNow(id, name));
 }
 
-async function deleteRecordingNow(id: string): Promise<void> {
-  const db = await openDatabase();
-  const transaction = db.transaction(RECORDINGS, 'readwrite');
+async function deleteRecordingNow(id: string, name: string): Promise<void> {
+  const db = await openDatabase(name);
+  const transaction = db.transaction([RECORDINGS, CAPTURES, CHUNKS], 'readwrite');
   transaction.objectStore(RECORDINGS).delete(id);
+  clearCaptureInTransaction(transaction, id);
   await transactionDone(transaction, '删除失败');
   db.close();
 }
@@ -349,13 +359,15 @@ export async function saveSettings(settings: AppSettings): Promise<void> {
   db.close();
 }
 
-export function clearLocalData(): Promise<void> {
-  return queueRecordingWrite(clearLocalDataNow);
+export function clearLocalData(name = DB_NAME): Promise<void> {
+  return queueRecordingWrite(() => clearLocalDataNow(name));
 }
 
-async function clearLocalDataNow(): Promise<void> {
-  const db = await openDatabase();
-  const transaction = db.transaction([RECORDINGS, SETTINGS, COURSES, MATERIALS], 'readwrite');
+async function clearLocalDataNow(name: string): Promise<void> {
+  const db = await openDatabase(name);
+  const transaction = db.transaction([RECORDINGS, SETTINGS, COURSES, MATERIALS, CAPTURES, CHUNKS], 'readwrite');
+  transaction.objectStore(CAPTURES).clear();
+  transaction.objectStore(CHUNKS).clear();
   transaction.objectStore(MATERIALS).clear();
   transaction.objectStore(RECORDINGS).clear();
   transaction.objectStore(SETTINGS).clear();
@@ -388,4 +400,120 @@ export function saveMaterial(material: StudyMaterial): Promise<void> {
       await transactionDone(tx, '学习资料保存失败');
     } finally { db.close(); }
   });
+}
+
+interface CaptureSession { id: string; recording: RecordingSession; mimeType: string }
+interface CaptureChunk { recordingId: string; sequence: number; blob: Blob; elapsedMs: number }
+
+function clearCaptureInTransaction(tx: IDBTransaction, id: string): void {
+  tx.objectStore(CAPTURES).delete(id);
+  tx.objectStore(CHUNKS).delete(IDBKeyRange.bound([id, 0], [id, Number.MAX_SAFE_INTEGER]));
+}
+
+export async function beginCaptureJournal(recording: RecordingSession, mimeType: string, name = DB_NAME): Promise<void> {
+  const db = await openDatabase(name);
+  try {
+    const tx = db.transaction([RECORDINGS, CAPTURES], 'readwrite', { durability: 'strict' });
+    const done = transactionDone(tx, '无法开启录音自动保存，请检查存储空间');
+    tx.objectStore(RECORDINGS).put(normalizeRecording(recording));
+    // add, not put: a second capture must never replace an unfinished original.
+    tx.objectStore(CAPTURES).add({ id: recording.id, recording, mimeType } satisfies CaptureSession);
+    await done;
+  } finally { db.close(); }
+}
+
+export async function appendCaptureChunk(chunk: CaptureChunk, name = DB_NAME): Promise<void> {
+  const db = await openDatabase(name);
+  try {
+    const tx = db.transaction([CAPTURES, CHUNKS], 'readwrite', { durability: 'strict' });
+    const done = transactionDone(tx, '录音片段保存失败，请立即停止并导出原音频');
+    const request = tx.objectStore(CAPTURES).get(chunk.recordingId);
+    request.onsuccess = () => {
+      if (!request.result) { tx.abort(); return; }
+      tx.objectStore(CHUNKS).add(chunk);
+    };
+    await done;
+  } finally { db.close(); }
+}
+
+/** Only call for a capture that failed before MediaRecorder.start; never remove any saved bytes. */
+export async function discardEmptyCaptureJournal(id: string, name = DB_NAME): Promise<void> {
+  const db = await openDatabase(name);
+  try {
+    const tx = db.transaction([CAPTURES, CHUNKS], 'readwrite', { durability: 'strict' });
+    const done = transactionDone(tx, '未启动的录音清理失败');
+    const request = tx.objectStore(CHUNKS).index('recordingId').count(id);
+    request.onsuccess = () => { if (request.result === 0) tx.objectStore(CAPTURES).delete(id); };
+    await done;
+  } finally { db.close(); }
+}
+
+export function finishCaptureJournal(recording: RecordingSession, name = DB_NAME): Promise<RecordingSession> {
+  return queueRecordingWrite(async () => {
+    const db = await openDatabase(name);
+    try {
+      const tx = db.transaction([RECORDINGS, CAPTURES, CHUNKS], 'readwrite', { durability: 'strict' });
+      const done = transactionDone(tx, '完整录音保存失败；已保存片段会在下次打开时恢复');
+      let finished = recording;
+      const request = tx.objectStore(RECORDINGS).get(recording.id);
+      request.onsuccess = () => {
+        // Live subtitles / handwritten notes may arrive while chunk writes drain.
+        finished = normalizeRecording({ ...recording, ...request.result, status: recording.status,
+          analysisStatus: recording.analysisStatus, analysisError: recording.analysisError,
+          audioBlob: recording.audioBlob, audioMimeType: recording.audioMimeType,
+          durationMs: recording.durationMs, updatedAt: nowIso() });
+        tx.objectStore(RECORDINGS).put(finished);
+        clearCaptureInTransaction(tx, recording.id);
+      };
+      await done;
+      return finished;
+    } finally { db.close(); }
+  });
+}
+
+/** Caller must hold the origin's workspace lock; never recover another live window. */
+export async function recoverCaptureJournals(name = DB_NAME): Promise<number> {
+  const db = await openDatabase(name);
+  let sessions: CaptureSession[];
+  let chunks: CaptureChunk[];
+  let recordings: RecordingSession[];
+  try {
+    const tx = db.transaction([RECORDINGS, CAPTURES, CHUNKS], 'readonly');
+    const done = transactionDone(tx, '录音恢复读取失败');
+    [sessions, chunks, recordings] = await Promise.all([
+      requestResult(tx.objectStore(CAPTURES).getAll()), requestResult(tx.objectStore(CHUNKS).getAll()),
+      requestResult(tx.objectStore(RECORDINGS).getAll()),
+    ]);
+    await done;
+  } finally { db.close(); }
+  let recovered = 0;
+  for (const session of sessions) {
+    const latest = recordings.find(r => r.id === session.id) ?? session.recording;
+    // An already-finalized original wins. Retain unexpected conflicting chunks for manual recovery.
+    if (latest.audioBlob?.size) continue;
+    const ordered = chunks.filter(c => c.recordingId === session.id).sort((a, b) => a.sequence - b.sequence);
+    const contiguous: CaptureChunk[] = [];
+    for (const chunk of ordered) {
+      if (chunk.sequence !== contiguous.length) break;
+      contiguous.push(chunk);
+    }
+    const blob = new Blob(contiguous.map(c => c.blob), { type: session.mimeType });
+    const warning = contiguous.length !== ordered.length
+      ? '检测到不连续片段，只恢复了中断前连续部分。请保留原件并核对音频。'
+      : blob.size ? '已恢复意外关闭前保存的录音；最后未写入的片段可能缺失。可重新转写并生成笔记。'
+        : '录音在第一个片段保存前中断，没有可恢复的音频。';
+    const restored: RecordingSession = { ...latest, status: 'complete', analysisStatus: 'error', analysisError: warning,
+      audioBlob: blob.size ? blob : undefined, audioMimeType: session.mimeType,
+      durationMs: contiguous.at(-1)?.elapsedMs ?? 0, updatedAt: nowIso() };
+    // Preserve non-contiguous evidence for support; ordinary contiguous journals finalize atomically.
+    if (contiguous.length !== ordered.length) {
+      const target = await openDatabase(name);
+      try {
+        const tx = target.transaction(RECORDINGS, 'readwrite');
+        const done = transactionDone(tx, '恢复保存失败'); tx.objectStore(RECORDINGS).put(restored); await done;
+      } finally { target.close(); }
+    } else await finishCaptureJournal(restored, name);
+    recovered += 1;
+  }
+  return recovered;
 }

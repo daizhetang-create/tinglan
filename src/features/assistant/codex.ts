@@ -1,4 +1,5 @@
 import type { RecordingSession } from '../../types';
+import { requireLocalBridge } from './localBridge';
 
 export interface CodexNotes {
   overview: string;
@@ -17,17 +18,20 @@ async function responseError(response: Response): Promise<Error> {
 }
 export async function getCodexStatus(): Promise<CodexStatus> {
   try {
+    requireLocalBridge();
     const response = await fetch(`${BASE}/api/codex/status`, { signal: AbortSignal.timeout(20000) });
     if (!response.ok) throw await responseError(response);
     return await response.json();
   } catch (error) { return { connected: false, authenticated: false, model: 'gpt-5.6-luna', message: error instanceof TypeError ? 'Codex 本地服务未启动。请使用“启动听澜”同时启动网站和服务。' : error instanceof Error ? error.message : 'Codex 连接失败。' }; }
 }
 export async function startCodexLogin(): Promise<{ loginId: string; authUrl: string }> {
+  requireLocalBridge();
   const response = await fetch(`${BASE}/api/codex/login`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Tinglan-Client': '1' }, body: '{}', signal: AbortSignal.timeout(45000) });
   if (!response.ok) throw await responseError(response);
   return await response.json();
 }
 export async function generateCodexNotes(recordings: RecordingSession[], prompt = '', onDelta?: (text: string) => void, signal?: AbortSignal): Promise<CodexNotes> {
+  requireLocalBridge();
   const response = await fetch(`${BASE}/api/codex/notes`, { method: 'POST', signal, headers: { 'Content-Type': 'application/json', 'X-Tinglan-Client': '1' }, body: JSON.stringify({ prompt, recordings: recordings.map(r => ({ id: r.id, title: r.title, createdAt: r.createdAt, segments: r.segments.map(s => ({ id: s.id, source: s.source, translation: s.translation, startMs: s.startMs })) })) }) });
   if (!response.ok) throw await responseError(response);
   if (!response.body) throw new Error('Codex 未返回数据流。');

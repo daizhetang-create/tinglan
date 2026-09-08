@@ -208,6 +208,10 @@ export class LiveTranscriber {
     this.worker.onmessage = ({ data }: MessageEvent<Reply>) => {
       if (data.type === 'engine-ready' && !this.pending) {
         this.options.onProgress({ state: 'ready', label: '实时模型已就绪 · 等待语音片段' });
+      } else if (data.type === 'warmup-error') {
+        const message = data.message ?? '实时转写模型加载失败，请检查网络后重试';
+        this.options.onProgress({ state: 'error', label: message });
+        this.options.onError(message);
       } else if (data.type === 'progress' || data.type === 'working') {
         this.options.onProgress({ state: data.type === 'progress' ? 'downloading' : 'working', label: data.label ?? '本地实时转写中', progress: data.progress });
       } else if ((data.type === 'result' || data.type === 'error') && this.pending && (!data.requestId || data.requestId === this.pending.id)) {
@@ -219,6 +223,7 @@ export class LiveTranscriber {
       }
     };
     this.worker.onerror = (event) => {
+      if (!this.disposed) this.options.onError(event.message || '实时转写引擎异常');
       this.failPending(new Error(event.message || '实时转写引擎异常'));
       this.worker?.terminate();
       this.worker = undefined;

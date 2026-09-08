@@ -1,0 +1,29 @@
+{
+  "schemaVersion": 1,
+  "id": "HARDEN-001",
+  "title": "Protect classroom capture and make the local release portable",
+  "priority": "P0",
+  "status": "active",
+  "scope": "integration",
+  "recommendedBranch": "codex/harden-001",
+  "dependsOn": [
+    "LEARN-001"
+  ],
+  "summary": "Follow-up audit found memory-only audio before stop, duplicate-start race, unbounded full-lecture decode and new-Windows startup dependency failures. Integration scope explicitly includes recorder, audio/translation runtime, native ASR setup launcher and assistant launch paths; no other writer is active. Keep accepted 0.4 online while hardening independently. Native Small bounded 60-second cores and draft protection added. Browser translation initialization also needs bounded waits.",
+  "acceptanceCriteria": [
+    "Captured audio is durably journaled before stop; interrupted capture can recover without overwriting a finalized original",
+    "Permission/recording start is serialized and capture cleanup affects only the owning session",
+    "A timed long-live workload records actual transcription/translation queue and saved-audio evidence; untested boundaries remain explicit",
+    "Existing recordings/materials and old/new backups survive database changes in isolated tests",
+    "Normal Windows launch does not require injected PowerShell 7 or a Git checkout; absent Node/Codex produces actionable errors",
+    "Accepted code, GitHub and deployed versions stay aligned after gated integration"
+  ],
+  "evidence": [
+    "docs/coordination/HARDEN_ACCEPTANCE.md and tests/runtime/harden-evidence.json distinguish measured evidence from limitations",
+    "Actual App English eight Small segments/translations/four Codex items and Chinese six Small segments/three Codex items persisted through reload",
+    "24 Node and four Python tests passed; journal 29, backup 36, study storage 38, persistence six isolated browser checks passed",
+    "Frozen baseline two-hour live soak: 1779 segments, 857 translation batches, zero skipped; native two-hour sparse file bounded to 1024000 samples",
+    "Final native HTTP: three windows, cancellation with worker exit, malformed rejection; candidate draft preserves prior full text"
+  ],
+  "updatedAt": "2026-09-08T00:11:59.6327764Z"
+}

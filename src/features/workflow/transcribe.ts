@@ -1,9 +1,17 @@
 import { decodeAudioTo16k } from '../../lib/audio';
 import type { ModelProgress, RecordingSession, TranscriptSegment } from '../../types';
+import { nativeTranscriptionStatus, nativeTranscribe } from './nativeTranscribe';
 
-export async function transcribeRecording(recording: RecordingSession, model: 'tiny' | 'base', progress: (value: ModelProgress) => void, signal?: AbortSignal): Promise<TranscriptSegment[]> {
+export async function transcribeRecording(recording: RecordingSession, model: 'tiny' | 'base', progress: (value: ModelProgress) => void, signal?: AbortSignal, savePartial?: (segments: TranscriptSegment[], durationMs?: number, warning?: string) => Promise<void>): Promise<TranscriptSegment[]> {
   if (!recording.audioBlob) throw new Error('这条记录没有音频，无法转写');
   if (signal?.aborted) throw new Error('已取消，录音仍然保留');
+  progress({label:'正在检查本机分窗精校引擎',state:'working'});
+  const native = await nativeTranscriptionStatus(signal);
+  if (native.available) return nativeTranscribe(recording, progress, signal, savePartial);
+  // Never decode a whole lecture into browser PCM. Unknown duration is not proof of a short file.
+  if (!recording.durationMs || recording.durationMs > 10*60000 || recording.audioBlob.size > 64*1024*1024) {
+    throw new Error(native.message || '长录音或未知时长音频需要本机分窗精校，请运行“配置本机转写”后重试。原音频仍然保留。');
+  }
   progress({label:'正在解码音频',state:'working'});
   const audio = await decodeAudioTo16k(recording.audioBlob);
   const audioDurationMs=audio.length/16000*1000;

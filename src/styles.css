@@ -1886,6 +1886,12 @@ button.course-card,
   .mode-switch span { font-size: 8px; }
 }
 
+.transcription-draft { margin: 12px 0; padding: 14px 18px; border: 1px solid #dbe3ef; border-radius: 12px; background: #fff; color: #354156; }
+.transcription-draft summary { cursor: pointer; font-size: 14px; }
+.transcription-draft > div { max-height: 240px; overflow: auto; }
+.transcription-draft p { line-height: 1.7; }
+.transcription-draft button { color: #2563eb; margin-right: 8px; min-height: 32px; }
+
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after {
     scroll-behavior: auto !important;

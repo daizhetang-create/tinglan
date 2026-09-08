@@ -1,0 +1,55 @@
+{
+  "capturedAt": "2026-09-07T23:44:00Z",
+  "baselineCommit": "8845fe6a9544eb1076268803faabf1d82133b460",
+  "candidateTask": "HARDEN-001",
+  "realTimeSoak": {
+    "status": "pass",
+    "build": "frozen 0.4 baseline, not the later capture-journal/native-ASR candidate",
+    "kind": "actual synthetic speech played at wall-clock speed through AudioWorklet/Whisper Tiny and local translation; not a human microphone",
+    "startedAt": "2026-09-07T21:40:49.508Z",
+    "targetSeconds": 7200,
+    "wallStreamSeconds": 7205.495899999998,
+    "firstTranscriptSeconds": 13.264800000000744,
+    "firstTranslationSeconds": 13.929,
+    "transcriptBeforeEnd": true,
+    "translationBeforeEnd": true,
+    "pauseResumePerformed": true,
+    "segments": 1779,
+    "translationBatches": 857,
+    "savedRecordingBytes": 100805604,
+    "lastEndMs": 7199117,
+    "captureStats": {"capturedMs":7199221.333333291,"bufferedMs":0,"peakQueuedChunks":1,"queuedChunks":0,"skippedChunks":0},
+    "errors": [],
+    "firstCheckpointJsHeapBytes": 15257256,
+    "lastCheckpointJsHeapBytes": 15053112,
+    "memoryCaveat": "JS heap excludes browser, native, WASM and encoded Blob storage. No claim of whole-process memory cap. 2-hour Blob was not fully decoded in this test."
+  },
+  "nativeAsrThreeWindows": {
+    "status":"pass","durationMs":141752,"segments":31,"model":"faster-whisper-small-int8",
+    "maxBufferedSamples":1024000,"boundaryWarnings":0,"elapsedSeconds":99.3,
+    "lastSegment":{"startMs":138400,"endMs":140580,"source":"This topic will appear on the final exam."},
+    "cancelAfterFirstSegmentWorkerExit":true,"cancelNeverReportedSuccess":true,"malformedAudioRejected":true
+  },
+  "nativeAsrTwoHourSparse": {
+    "status":"pass","durationMs":7200000,"segments":95,"speechBursts":24,
+    "kind":"12-second synthetic speech at the end of each five-minute block; not dense two-hour speech accuracy",
+    "maxBufferedSamples":1024000,"boundaryWarnings":0,"elapsedSeconds":157.34,
+    "lastSegment":{"startMs":7196640,"endMs":7198880,"source":"This topic will appear on the final exam."}
+  },
+  "captureJournal": {
+    "isolatedChecksPassed":29,
+    "realInterruptedWebmDecodeSeconds":6.12,
+    "recoveryCaveat":"Approx. 9 seconds capture interrupted by navigation. Only the decodable committed prefix is promised; final uncommitted/container-tail audio can be lost.",
+    "includes":["v3-to-v4 old Blob preservation","late handwritten note merge","atomic abort retains chunks","draft backup","empty failed-start retry","cross-tab lock"]
+  },
+  "portable": {"prebuiltZipWithoutGitOrPwshOrNodeModules":true,"npmCodexRealHandshake":true,"npmWrapperExitWithoutResidualChildren":true},
+  "candidateApp": {
+    "origin":"http://127.0.0.1:4549",
+    "microphone":"real WAV-derived MediaStream, synthetic speech, not user microphone",
+    "english":{"segments":8,"translated":true,"codexItems":4,"reloadRetained":true,"finalAtLocal":"2026-09-08 07:48:05"},
+    "chinese":{"segments":6,"codexItems":3,"reloadRetained":true,"finalAtLocal":"2026-09-08 08:09:25"},
+    "sourceTimingCaveat":"Controlled source stops after 42 seconds; decoded saved MediaStream audio is ~39.72 seconds. Source silence does not certify wall-clock recorder duration accuracy.",
+    "postSensitiveHostGuard":{"entrypoints":6,"remoteFetches":0,"nodeChecksPassed":24}
+  },
+  "limitations":["Speech recognition/translation are approximate; real compressed fixture still sometimes recognizes Read as Red.","No arbitrary malformed codec RSS cap or sleep/wake certification.","Final candidate App and release integration still require their own final gates; this file is not deployment evidence."]
+}
