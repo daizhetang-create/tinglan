@@ -101,6 +101,20 @@ function validateRecording(value: unknown): Omit<RecordingSession, 'audioBlob'> 
   oneOf(recording.analysisStatus, ['idle', 'queued', 'transcribing', 'summarizing', 'ready', 'error'], 'recording.analysisStatus');
   oneOf(recording.recordingMode, ['zh', 'en-zh'], 'recording.recordingMode');
   if (recording.audioBlob !== undefined) invalid('音频必须使用备份音频字段');
+  optionalString(recording.transcriptionEngine, 'transcriptionEngine');
+  optionalString(recording.transcriptionWarning, 'transcriptionWarning');
+  if (recording.transcriptionDraft !== undefined) {
+    const draft = object(recording.transcriptionDraft, 'transcriptionDraft');
+    date(draft.updatedAt, 'transcriptionDraft.updatedAt');
+    if (draft.durationMs !== undefined) number(draft.durationMs, 'transcriptionDraft.durationMs');
+    const segments = array(draft.segments, 'transcriptionDraft.segments');
+    uniqueIds(segments, 'transcriptionDraft.segments');
+    for (const row of segments) {
+      const item = object(row, 'draft segment');
+      for (const key of ['source','translation','speaker']) string(item[key], `draft.${key}`);
+      if (number(item.endMs,'draft.endMs') < number(item.startMs,'draft.startMs')) invalid('草稿时间顺序');
+    }
+  }
 
   for (const key of ['segments', 'notes', 'bookmarks', 'keyMessages']) uniqueIds(array(recording[key], key), key);
   for (const value of array(recording.segments, 'segments')) {

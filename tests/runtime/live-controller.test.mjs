@@ -7,7 +7,7 @@ import { webcrypto } from 'node:crypto';
 import vm from 'node:vm';
 import ts from 'typescript';
 
-function loadClass(relativePath, exportName) {
+function loadClass(relativePath, exportName, overrides = {}) {
   let source = readFileSync(new URL(relativePath, import.meta.url), 'utf8');
   source = source.replace(/import captureModuleUrl from [^;]+;/, "const captureModuleUrl = 'pcm.js';")
     .replace(/new URL\([^,]+, import\.meta\.url\)/g, "'test-worker.js'");
@@ -18,7 +18,7 @@ function loadClass(relativePath, exportName) {
     terminate() { this.terminated = true; }
   }
   const exports = {};
-  const context = vm.createContext({ exports, Worker: StalledWorker, crypto: webcrypto, setTimeout, clearTimeout, console });
+  const context = vm.createContext({ exports, Worker: StalledWorker, crypto: webcrypto, setTimeout, clearTimeout, console, ...overrides });
   const compiled = ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText;
   vm.runInContext(compiled, context);
   return { Class: exports[exportName], workers };
@@ -68,4 +68,32 @@ test('translation queue bounds backlog and disposal cannot spawn replacement wor
   assert.equal(workers.length, 1);
   assert.equal(workers[0].terminated, true);
   await assert.rejects(service.translate('After disposal'), /已关闭/);
+});
+
+test('stalled browser model creation falls back and destroys a late translator', async () => {
+  let resolveCreate, destroyed=0;
+  const {Class:TranslationService,workers}=loadClass('../../src/lib/translation.ts','TranslationService',{
+    Translator:{availability:async()=>'available',create:()=>new Promise(resolve=>{resolveCreate=resolve;})},
+    setTimeout:(fn,ms)=>setTimeout(fn,ms<=12000?5:ms),
+  });
+  const service=new TranslationService('auto',()=>{});
+  const result=service.translate('Test');
+  for(let i=0;i<30&&!workers.length;i++)await new Promise(resolve=>setTimeout(resolve,5));
+  assert.equal(workers.length,1,'browser init cannot indefinitely block local fallback');
+  const request=workers[0].messages[0];
+  workers[0].onmessage({data:{type:'result',requestId:request.requestId,text:'测试'}});
+  assert.equal(await result,'测试');
+  resolveCreate({translate:async()=>'',destroy(){destroyed++;}});
+  await Promise.resolve();assert.equal(destroyed,1);
+  service.dispose();
+});
+
+test('one worker failure drains the old queue without twenty-four reload attempts', async () => {
+  const {Class:TranslationService,workers}=loadClass('../../src/lib/translation.ts','TranslationService');
+  const service=new TranslationService('local',()=>{});
+  const settled=Promise.allSettled(Array.from({length:24},()=>service.translate('Test')));
+  await Promise.resolve();
+  workers[0].onerror({message:'injected initialization failure'});
+  assert.equal((await settled).filter(r=>r.status==='rejected').length,24);
+  assert.equal(workers.length,1);service.dispose();
 });

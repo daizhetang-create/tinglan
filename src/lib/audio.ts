@@ -12,7 +12,7 @@ export async function decodeAudioTo16k(blob: Blob): Promise<Float32Array> {
   const bytes = await blob.arrayBuffer();
   const context = new AudioContext();
   try {
-    const decoded = await context.decodeAudioData(bytes.slice(0));
+    const decoded = await context.decodeAudioData(bytes);
     const mono = mixToMono(decoded);
     return resampleLinear(mono, decoded.sampleRate, 16_000);
   } finally {
@@ -21,7 +21,7 @@ export async function decodeAudioTo16k(blob: Blob): Promise<Float32Array> {
 }
 
 function mixToMono(buffer: AudioBuffer): Float32Array {
-  if (buffer.numberOfChannels === 1) return buffer.getChannelData(0).slice();
+  if (buffer.numberOfChannels === 1) return buffer.getChannelData(0);
   const output = new Float32Array(buffer.length);
   for (let channel = 0; channel < buffer.numberOfChannels; channel += 1) {
     const source = buffer.getChannelData(channel);
@@ -49,16 +49,19 @@ function resampleLinear(input: Float32Array, inputRate: number, outputRate: numb
 
 export async function getAudioDuration(blob: Blob): Promise<number> {
   const url = URL.createObjectURL(blob);
+  const audio = document.createElement('audio');
+  let timer: ReturnType<typeof setTimeout> | undefined;
   try {
-    const audio = document.createElement('audio');
     audio.preload = 'metadata';
     audio.src = url;
     return await new Promise<number>((resolve, reject) => {
+      timer = setTimeout(() => resolve(0), 10000);
       audio.onloadedmetadata = () => resolve(Number.isFinite(audio.duration) ? audio.duration * 1000 : 0);
       audio.onerror = () => reject(new Error('无法读取音频时长'));
     });
   } finally {
+    clearTimeout(timer);
+    audio.removeAttribute('src'); audio.load();
     URL.revokeObjectURL(url);
   }
 }
-

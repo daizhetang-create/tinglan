@@ -4,7 +4,7 @@ Updated: 2026-09-08. Accepted code is **main HEAD**; use `npm run coord -- statu
 
 ## Outcome
 
-The original zero-transcript failure has been fixed. The website connects real local audio recognition/translation to a real ChatGPT-subscription Codex notes service. The 0.4 study-library candidate additionally handles real image understanding, mixed image/text/audio intake, cited assignment/DDL retrieval and the existing personal vault. Only integrated main is accepted; this document is not proof that a dirty candidate or cloud deployment is live. It is **not certified perfect or a measured 90/100**: classroom acoustic accuracy and long-lecture stress still need validation.
+The original zero-transcript failure has been fixed. The website connects real local audio recognition/translation to real ChatGPT-subscription Codex notes. 0.5 adds durable capture journals, exclusive workspace ownership, native bounded Small refinement, translation initialization timeouts, portable Windows launch and hosted sensitive-request guards. The study library retains real image understanding, mixed intake and cited assignment/DDL retrieval. Only integrated main is accepted; candidate evidence is not deployment evidence. It is **not certified perfect or a measured 90/100**: acoustic accuracy, dense long lectures and sleep/wake still need validation.
 
 ## What is implemented and evidenced
 
@@ -27,7 +27,8 @@ The original zero-transcript failure has been fixed. The website connects real l
 
 ## Product architecture
 
-- Browser: MediaRecorder, IndexedDB, AudioWorklet, Whisper Tiny for live captions, selected Tiny/Base for final refinement, local Opus English->Chinese translation.
+- Browser: MediaRecorder with one-second IndexedDB v4 journal, exclusive Web Lock, AudioWorklet, Whisper Tiny live captions and local Opus English->Chinese translation. Short-file Base/Tiny fallback only when native unavailable and known <=10 minutes / 64 MB.
+- Local native refinement: Python/PyAV sequential decode, faster-whisper Small CPU int8, 60-second cores with two-second context, bounded 64-second PCM buffer, draft persistence and cancellation. <=512 MB upload / four-hour audio limit. No Audio API.
 - Backend: localhost-only Node bridge owns Codex App Server stdio and uses ChatGPT-managed authentication.
 - Only selected transcript/material text and explicit images are sent to Codex. Raw recording files stay local: browser and, when configured, the existing personal vault. No OpenAI Audio API is used.
 - Website notes are persisted by the website. Temporary Codex sessions are not represented as a mirror of the desktop task sidebar.
@@ -35,7 +36,7 @@ The original zero-transcript failure has been fixed. The website connects real l
 
 ## Remaining work / limitations
 
-1. No 60–120 minute classroom, sleep/wake, crash-during-capture or multi-hour memory soak certification. Entire-file decoding still has memory cost. Keep the page/computer awake and stop/save at reasonable breaks.
+1. Two-hour live synthetic speech soak passes on frozen 0.4 runtime: 1779 segments, 857 translation batches, zero skipped chunks, ~101 MB saved. 0.5 native pipeline passes two-hour sparse speech file and three-window cancellation tests. These are not dense real classroom accuracy or sleep/wake certification. Journal recovery guarantees only a decodable committed prefix, not the last uncommitted tail; browser encoded Blob storage still grows with recording length.
 2. Live captions are approximate; first-time model downloads are not real-time. Tiny misrecognizes some words; Base improves important terms but still makes mistakes and may repeat text.
 3. Microphone/distance/noise, accents, Cantonese and mixed-language lessons require real-user testing. Tests used openly identified synthetic speech, not a fabricated microphone-permission pass.
 4. Stop-time processing and upload jobs run while the page is open. After interruption, saved audio/text can be retried; no durable OS background job daemon.
@@ -44,7 +45,11 @@ The original zero-transcript failure has been fixed. The website connects real l
 7. Not every Notta feature exists: no collaboration accounts, speaker diarization, calendar meeting bot, online shared links, mobile native app, or signed installer.
 8. App has extracted runtime/assistant/storage/workflow modules but still has a large integration component. ARCH-001/UI-001/QA-001 remain future refinement tasks, not falsely marked finished.
 9. Study intake does not yet parse PDF/Office. Cross-library queries are bounded and disclose selected-source coverage; query replies are temporary while material analyses persist. Exact-quote validation verifies citations, not overall model reasoning accuracy.
-10. Online static UI does not include the user's localhost Codex/vault service. GitHub private repository exists; Cloudflare and Sites delivery must be verified by terminal deployment results. Other requested platforms are unspecified and await the user's names; do not mark the overall goal complete.
+10. Online static UI does not include the user's localhost Codex/vault service. All sensitive bridge entrypoints reject non-loopback origins before fetch. GitHub private repository and owner-only Sites deployment exist; Cloudflare artifacts have no public route. Every update still needs exact-version terminal deployment receipts. Other requested platforms are unspecified; do not invent destinations or mark the overall goal complete.
+
+## 0.5 hardening verification
+
+See `HARDEN_ACCEPTANCE.md` and `tests/runtime/harden-evidence.json`. Actual candidate App English recording -> eight Small segments -> Chinese translation -> four Codex items; Chinese recording -> six Small segments -> three Codex items. Both survive navigation/reload. Cancellation preserves originals and old full subtitles. 29 journal checks, 36 original backup checks, 38 study storage checks, six persistence checks, 24 Node checks and four Python window tests pass. Portable startup and final archive checks are tracked separately; deployment is never inferred from these checks.
 
 ## How another task should join
 

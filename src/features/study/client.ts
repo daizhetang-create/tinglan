@@ -1,7 +1,9 @@
 import type { Course, RecordingSession } from '../../types';
+import { requireLocalBridge } from '../assistant/localBridge';
 import { materialSourceId, recordingSourceId, type StudyAnalysis, type StudyBlock, type StudyMaterial, type StudySource } from './types';
 
 export async function studyRequest<T>(path: 'image' | 'analyze', body: unknown, signal?: AbortSignal, onStatus?: (message: string) => void): Promise<T> {
+  requireLocalBridge();
   const response = await fetch(`/api/study/${path}`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Tinglan-Client': '1' }, body: JSON.stringify(body), signal: AbortSignal.any([signal ?? new AbortController().signal, AbortSignal.timeout(280000)]) });
   if (!response.ok) { const error = await response.json().catch(() => null); throw new Error(error?.message || 'Codex 本机服务未连接，请在设置中检查连接。'); }
   if (!response.headers.get('content-type')?.includes('application/x-ndjson') || !response.body) throw new Error('当前网站没有连接 Codex 服务。请使用本机完整版本，网页托管不包含你的本机 AI。');

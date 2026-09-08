@@ -1,4 +1,5 @@
-import { spawn, spawnSync } from 'node:child_process';
+import { spawn } from 'node:child_process';
+import { resolveCodexCommand } from './codex-command.mjs';
 import { EventEmitter } from 'node:events';
 import { createInterface } from 'node:readline';
 import { mkdtemp, readFile } from 'node:fs/promises';
@@ -20,23 +21,34 @@ export function publicError(error) {
 }
 
 function resolveCodex() {
-  if (process.env.TINGLAN_CODEX_BIN) return process.env.TINGLAN_CODEX_BIN;
-  if (process.platform !== 'win32') return 'codex';
-  const probe = spawnSync('where.exe', ['codex.exe'], { encoding: 'utf8', windowsHide: true });
-  const path = probe.stdout?.split(/\r?\n/).find(Boolean);
-  if (!path) throw new BridgeError('CLI_MISSING', '没有找到 Codex CLI。请安装或更新 Codex 后重新启动听澜。', 503);
-  return path;
+  try { return resolveCodexCommand(); }
+  catch { throw new BridgeError('CLI_MISSING', '没有找到 Codex CLI。请按官方说明安装 Codex，再用 ChatGPT 登录并重启听澜。支持独立安装和 npm 安装。', 503); }
+}
+
+const terminatingChildren = new WeakSet();
+function terminateChild(child) {
+  if (!child || terminatingChildren.has(child)) return;
+  terminatingChildren.add(child);
+  child.stdin.end();
+  const timer = setTimeout(() => {
+    if (child.exitCode !== null || child.signalCode !== null || !child.pid) return;
+    if (process.platform === 'win32') {
+      const cleanup = spawn('taskkill.exe', ['/PID', String(child.pid), '/T', '/F'], { windowsHide: true, stdio: 'ignore' });
+      cleanup.on('error', () => child.kill()); cleanup.unref();
+    } else child.kill();
+  }, 3000);
+  timer.unref(); child.once('exit', () => clearTimeout(timer));
 }
 
 export class CodexRpc extends EventEmitter {
-  constructor() { super(); this.pending = new Map(); this.nextId = 1; this.child = null; this.starting = null; this.cwd = null; }
+  constructor() { super(); this.pending = new Map(); this.nextId = 1; this.child = null; this.starting = null; this.cwd = null; this.generation = 0; }
   async start() {
     if (this.starting) return this.starting;
     if (this.child && !this.child.killed) return;
-    this.starting = this.initialize().catch(error => { this.close(); throw error; }).finally(() => { this.starting = null; });
+    this.starting = this.initialize(this.generation).catch(error => { this.close(); throw error; }).finally(() => { this.starting = null; });
     return this.starting;
   }
-  async initialize() {
+  async initialize(generation) {
     this.cwd ||= await mkdtemp(join(tmpdir(), 'tinglan-codex-'));
     const disabled = ['shell_tool', 'unified_exec', 'apps', 'plugins', 'remote_plugin', 'hooks', 'multi_agent', 'multi_agent_v2', 'browser_use', 'browser_use_external', 'computer_use', 'view_image', 'image_generation', 'code_mode', 'code_mode_host', 'code_mode_only', 'skill_search', 'workspace_dependencies', 'memories', 'sleep_tool', 'goals', 'in_app_browser', 'in_app_chat', 'in_app_local_automation'];
     const args = ['app-server', '--stdio', '-c', 'web_search="disabled"', '-c', 'approval_policy="never"', '-c', 'sandbox_mode="read-only"', '-c', 'project_doc_max_bytes=0', '-c', 'suppress_unstable_features_warning=true'];
@@ -45,17 +57,23 @@ export class CodexRpc extends EventEmitter {
     const configPath = join(process.env.CODEX_HOME || join(homedir(), '.codex'), 'config.toml');
     const configText = await readFile(configPath, 'utf8').catch(() => '');
     for (const match of configText.matchAll(/^\s*\[mcp_servers\.([\w-]+|"[^"\r\n]+"|'[^'\r\n]+')(?:\.[^\]]+)?\]\s*$/gm)) args.push('-c', `mcp_servers.${match[1]}.enabled=false`);
-    const child = spawn(resolveCodex(), args, { cwd: this.cwd, stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true, env: process.env });
+    const executable = resolveCodex();
+    if (generation !== this.generation) throw new BridgeError('CANCELLED', 'Codex 启动已取消。', 499);
+    const child = spawn(executable.command, [...executable.argsPrefix, ...args], { cwd: this.cwd, stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true, env: process.env, shell: false });
     this.child = child;
     const onDeath = () => {
+      terminateChild(child);
       if (this.child !== child) return;
       this.child = null;
       for (const { reject, timer } of this.pending.values()) { clearTimeout(timer); reject(new BridgeError('SERVER_RESTARTED', 'Codex 连接已断开，请重试；录音与已保存笔记不受影响。', 503)); }
       this.pending.clear(); this.emit('disconnected');
     };
     child.once('error', onDeath); child.once('exit', onDeath);
+    child.stdin.on('error', onDeath);
+    child.stdin.once('close', onDeath);
     child.stderr.on('data', () => {}); // Never publish runtime stderr: it may contain user paths or auth details.
     createInterface({ input: child.stdout }).on('line', (line) => {
+      if (this.child !== child) return;
       let message; try { message = JSON.parse(line); } catch { return; }
       if (message.method && message.id !== undefined) {
         // This product never executes tools or grants approvals. Unknown server requests fail closed.
@@ -82,9 +100,12 @@ export class CodexRpc extends EventEmitter {
     });
   }
   close() {
+    this.generation++;
     const child = this.child; this.child = null;
     for (const { reject, timer } of this.pending.values()) { clearTimeout(timer); reject(new BridgeError('SERVER_RESTARTED', 'Codex 连接已断开，请重试。', 503)); }
-    this.pending.clear(); child?.kill(); this.emit('disconnected');
+    this.pending.clear();
+    terminateChild(child);
+    this.emit('disconnected');
   }
 }
 

@@ -5,6 +5,7 @@ const progress = document.querySelector('#progress');
 const resultNode = document.querySelector('#result');
 const button = document.querySelector('#start');
 const language = new URLSearchParams(location.search).get('case') === 'zh' ? 'zh-CN' : 'en-US';
+const duration = Math.min(7200, Math.max(52, Number(new URLSearchParams(location.search).get('seconds')) || 52));
 const evidence = { kind: `real-time synthetic ${language} speech, not human microphone`, segments: [], translations: [], errors: [] };
 const show = () => { resultNode.textContent = JSON.stringify(evidence, null, 2); };
 const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -49,14 +50,14 @@ button.onclick = async () => {
     evidence.stage = 'timed live stream'; show();
     const destination = context.createMediaStreamDestination();
     const source = context.createBufferSource();
-    const duration = 52;
-    const repeated = context.createBuffer(1, Math.ceil(duration * context.sampleRate), context.sampleRate);
+    // Keep the source buffer constant-size even during a two-hour real-time soak.
+    // This is original-pace synthetic speech, not time-compressed inference.
+    const repeated = context.createBuffer(1, Math.ceil((speech.duration + 0.8) * context.sampleRate), context.sampleRate);
     const samples = repeated.getChannelData(0);
     // Repeat the actual audio at its original pace with 800 ms gaps.
-    for (let second = 0; second < duration; second += speech.duration + 0.8) {
-      for (let i = 0; i < speech.length && second * context.sampleRate + i < samples.length; i += 1) samples[Math.floor(second * context.sampleRate) + i] = speech.getChannelData(0)[i];
-    }
+    samples.set(speech.getChannelData(0));
     source.buffer = repeated;
+    source.loop = true;
     source.connect(destination);
     const recorded = [];
     recorder = new MediaRecorder(destination.stream);
@@ -87,9 +88,19 @@ button.onclick = async () => {
     });
     await live.start(destination.stream);
     began = performance.now();
-    recorder.start();
+    evidence.targetSeconds = duration;
+    evidence.startedAt = new Date().toISOString();
+    evidence.checkpoints = [];
+    const checkpointTimer = setInterval(() => {
+      evidence.elapsedSeconds = (performance.now() - began) / 1000;
+      evidence.captureStats = live.stats;
+      evidence.checkpoints.push({ seconds: evidence.elapsedSeconds, segments: evidence.segments.length, translated: evidence.translations.length, recordedBytes: recorded.reduce((n, blob) => n + blob.size, 0), stats: live.stats, jsHeapBytes: performance.memory?.usedJSHeapSize ?? null });
+      show();
+    }, 60_000);
+    recorder.start(1000);
     const sourceEnded = new Promise((resolve) => { source.onended = resolve; });
     source.start();
+    source.stop(context.currentTime + duration);
     const pauseCheck = (async () => {
       await wait(16000);
       live.pause(); recorder.pause(); await context.suspend();
@@ -98,6 +109,7 @@ button.onclick = async () => {
       evidence.pauseResumePerformed = true;
     })();
     await sourceEnded;
+    clearInterval(checkpointTimer);
     ended = true;
     evidence.wallStreamSeconds = (performance.now() - began) / 1000;
     await pauseCheck;
@@ -112,7 +124,7 @@ button.onclick = async () => {
     if (!evidence.segments.length || !evidence.transcriptBeforeEnd) throw new Error('No actual transcription before stream ended');
     if (language === 'en-US' && (!evidence.translationBeforeEnd || !evidence.translations.every((text) => /[\u3400-\u9fff]/.test(text)))) throw new Error('No Chinese translation before stream ended');
     if (evidence.captureStats.peakQueuedChunks > 3 || evidence.captureStats.queuedChunks !== 0 || evidence.captureStats.skippedChunks !== 0) throw new Error('Queue bound/draining failed');
-    if (evidence.lastEndMs > 53500) throw new Error('Transcript clock included pause or overflowed capture duration');
+    if (evidence.lastEndMs > duration * 1000 + 1500) throw new Error('Transcript clock included pause or overflowed capture duration');
     if (!evidence.savedRecordingBytes) throw new Error('Independent audio recording is empty');
     if (evidence.errors.length) throw new Error('Live errors occurred');
     evidence.status = 'pass';

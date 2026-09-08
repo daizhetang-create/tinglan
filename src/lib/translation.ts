@@ -2,6 +2,13 @@ import type { ModelProgress, TranslationPreference } from '../types';
 
 type ProgressListener = (progress: ModelProgress) => void;
 
+async function bounded<T>(promise: Promise<T>, milliseconds: number, onTimeout?: () => void): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([promise, new Promise<never>((_,reject)=>{timer=setTimeout(()=>{onTimeout?.();reject(new Error('浏览器翻译响应超时，已回退本地模型'));},milliseconds);})]);
+  } finally { clearTimeout(timer); }
+}
+
 interface WorkerReply {
   type: 'progress' | 'result' | 'error';
   requestId?: string;
@@ -35,6 +42,7 @@ export class TranslationService {
   private queue: Promise<void> = Promise.resolve();
   private disposed = false;
   private queuedTasks = 0;
+  private epoch = 0;
 
   constructor(preference: TranslationPreference, listener: ProgressListener) {
     this.preference = preference;
@@ -52,7 +60,11 @@ export class TranslationService {
     if (this.queuedTasks >= 24) throw new Error('翻译队列暂时繁忙，英文原文已保留，请稍后重试');
 
     this.queuedTasks += 1;
-    const task = this.queue.then(() => this.performTranslation(clean)).finally(() => { this.queuedTasks -= 1; });
+    const epoch = this.epoch;
+    const task = this.queue.then(() => {
+      if (epoch !== this.epoch) throw new Error('上次翻译未完成，原文已保留；请重试');
+      return this.performTranslation(clean);
+    }).catch(error=>{if(epoch===this.epoch)this.epoch++;throw error;}).finally(() => { this.queuedTasks -= 1; });
     this.queue = task.then(
       () => undefined,
       () => undefined,
@@ -64,13 +76,15 @@ export class TranslationService {
     if (this.disposed) throw new Error('翻译服务已关闭');
     if (this.preference !== 'local') {
       const translator = await this.getBrowserTranslator();
+      if (this.disposed) throw new Error('翻译服务已关闭');
       if (translator) {
         this.listener({ label: '浏览器翻译中', state: 'working' });
         try {
-          const result = await translator.translate(clean);
+          const result = await bounded(translator.translate(clean), 10000);
           this.listener({ label: '浏览器翻译已就绪', state: 'ready' });
           return result;
         } catch (error) {
+          translator.destroy?.(); this.browserTranslator = undefined;
           if (this.preference === 'browser') throw error;
         }
       } else if (this.preference === 'browser') {
@@ -78,6 +92,7 @@ export class TranslationService {
       }
     }
 
+    if (this.disposed) throw new Error('翻译服务已关闭');
     return this.translateWithWorker(clean);
   }
 
@@ -98,9 +113,10 @@ export class TranslationService {
     if (!factory) return undefined;
 
     try {
-      const availability = await factory.availability({ sourceLanguage: 'en', targetLanguage: 'zh' });
+      const availability = await bounded(factory.availability({ sourceLanguage: 'en', targetLanguage: 'zh' }), 4000);
       if (availability === 'unavailable' || availability === 'no') return undefined;
-      this.browserTranslator = await factory.create({
+      let abandoned = false;
+      const created = factory.create({
         sourceLanguage: 'en',
         targetLanguage: 'zh',
         monitor: (monitor) => {
@@ -114,6 +130,9 @@ export class TranslationService {
           });
         },
       });
+      void created.then(translator=>{if(abandoned||this.disposed)translator.destroy?.();},()=>{});
+      this.browserTranslator = await bounded(created, 12000, ()=>{abandoned=true;});
+      if (this.disposed) { this.browserTranslator = undefined; return undefined; }
       this.listener({ label: '浏览器翻译已就绪', state: 'ready' });
       return this.browserTranslator;
     } catch {

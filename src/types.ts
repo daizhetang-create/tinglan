@@ -89,6 +89,9 @@ export interface RecordingSession {
   analysisStatus: AnalysisStatus;
   analysisError?: string;
   aiError?: string;
+  transcriptionDraft?: { segments: TranscriptSegment[]; durationMs?: number; updatedAt: string };
+  transcriptionEngine?: string;
+  transcriptionWarning?: string;
   summaryScope?: 'recording' | 'class' | 'course';
   recordingMode: RecordingMode;
   sourceLanguage: string;

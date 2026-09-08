@@ -1,4 +1,5 @@
 import type { RecordingSession } from '../../types';
+import { requireLocalBridge } from '../assistant/localBridge';
 import { buildSources } from './client';
 import type { StudyAnalysis, StudyClaim, StudyMaterial } from './types';
 
@@ -6,6 +7,7 @@ export interface VaultStatus { configured: boolean; message: string; localOnly: 
 export interface VaultReceipt { sha256: string; note: string; state: string }
 export async function getVaultStatus(): Promise<VaultStatus> {
   try {
+    requireLocalBridge();
     const response = await fetch('/api/library/status', { signal: AbortSignal.timeout(15000) });
     if (!response.ok || !response.headers.get('content-type')?.includes('application/json')) throw new Error();
     return await response.json();
@@ -17,6 +19,7 @@ async function receive(response: Response) {
   return result;
 }
 export async function syncVault(original: Blob, fileName: string, sources: Array<{ id: string; title: string; text: string }>, analysis: StudyAnalysis, warnings: string[] = [], signal?: AbortSignal): Promise<VaultReceipt> {
+  requireLocalBridge();
   const effective = AbortSignal.any([signal ?? new AbortController().signal, AbortSignal.timeout(240000)]);
   const upload = await receive(await fetch('/api/library/upload', { method: 'POST', headers: { 'Content-Type': 'application/octet-stream', 'X-Tinglan-Client': '1', 'X-Tinglan-Filename': encodeURIComponent(fileName) }, body: original, signal: effective }));
   return receive(await fetch('/api/library/finalize', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Tinglan-Client': '1' }, body: JSON.stringify({ ticket: upload.ticket, sha256: upload.sha256, sources, analysis, warnings }), signal: effective }));

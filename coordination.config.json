@@ -79,9 +79,10 @@
       "src/styles.css", "src/notta-theme.css", "public/sw.js", "index.html",
       "docs/coordination/**", "docs/architecture/**", ".agents/skills/project-coordination/**",
       ".githooks/**", "scripts/**", "src/features/workflow/**", "tests/workflow/**",
-      "README.md", "启动听澜.cmd", ".gitignore",
+      "README.md", "启动听澜.cmd", "配置本机转写.cmd", ".gitignore",
       "src/features/study/**", "src/features/storage/backup.ts", "server/**", "tests/study/**",
-      ".openai/**", ".github/**", "wrangler.jsonc"
+      ".openai/**", ".github/**", "wrangler.jsonc",
+      "src/features/recorder/**", "src/lib/audio.ts", "src/lib/translation.ts", "src/features/assistant/**", "tests/runtime/**"
     ]
   }
 }
