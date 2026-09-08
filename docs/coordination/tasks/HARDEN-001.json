@@ -3,7 +3,7 @@
   "id": "HARDEN-001",
   "title": "Protect classroom capture and make the local release portable",
   "priority": "P0",
-  "status": "active",
+  "status": "ready",
   "scope": "integration",
   "recommendedBranch": "codex/harden-001",
   "dependsOn": [
@@ -23,7 +23,31 @@
     "Actual App English eight Small segments/translations/four Codex items and Chinese six Small segments/three Codex items persisted through reload",
     "24 Node and four Python tests passed; journal 29, backup 36, study storage 38, persistence six isolated browser checks passed",
     "Frozen baseline two-hour live soak: 1779 segments, 857 translation batches, zero skipped; native two-hour sparse file bounded to 1024000 samples",
-    "Final native HTTP: three windows, cancellation with worker exit, malformed rejection; candidate draft preserves prior full text"
+    "Final native HTTP: three windows, cancellation with worker exit, malformed rejection; candidate draft preserves prior full text",
+    "",
+    "> lectureflow-local@0.5.0 check",
+    "> tsc -b --pretty false",
+    "",
+    "",
+    "> lectureflow-local@0.5.0 build",
+    "> tsc -b && vite build && node scripts/stamp-build.mjs",
+    "",
+    "vite v8.0.13 building client environment for production...",
+    "\u001b[2K",
+    "transforming...✓ 41 modules transformed.",
+    "rendering chunks...",
+    "computing gzip size...",
+    "dist/index.html                                                 0.78 kB │ gzip:     0.51 kB",
+    "dist/assets/translation.worker-DBk18nBN.js                    517.46 kB",
+    "dist/assets/transcription.worker-66MuyZzo.js                  518.99 kB",
+    "dist/assets/ort-wasm-simd-threaded.asyncify-DMmc6YqF.wasm  23,567.05 kB │ gzip: 5,824.05 kB",
+    "dist/assets/index-DthOUcNK.css                                117.05 kB │ gzip:    24.50 kB",
+    "dist/assets/index-Df5NFJwu.js                                 362.23 kB │ gzip:   112.31 kB",
+    "",
+    "✓ built in 1.52s",
+    "npm run check: pass",
+    "npm run build: pass"
   ],
-  "updatedAt": "2026-09-08T00:11:59.6327764Z"
+  "updatedAt": "2026-09-08T00:47:48.4760751Z",
+  "resultSummary": "Verified 0.5: durable recording recovery, bounded Small ASR, actual Chinese/English Codex workflow, portable launch and hosted no-upload guards; documented limits"
 }
