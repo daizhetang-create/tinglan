@@ -5,6 +5,7 @@ import { homedir, tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { BridgeError } from './codex.mjs';
+import { RetainedAsr } from './retained-asr.mjs';
 
 const WORKER = fileURLToPath(new URL('./asr_worker.py', import.meta.url));
 const LIMIT = 512 * 1024 * 1024;
@@ -16,6 +17,9 @@ export class AsrService {
     const venv = fileURLToPath(new URL(process.platform === 'win32' ? '../.runtime/asr-venv/Scripts/python.exe' : '../.runtime/asr-venv/bin/python', import.meta.url));
     this.python = python || process.env.TINGLAN_PYTHON || (existsSync(venv) ? venv : existsSync(known) ? known : process.platform === 'win32' ? 'python' : 'python3');
     this.active = false; this.children = new Set(); this.cached = null; this.checking = null; this.closed = false; this.request = null;
+    // Separate lanes: a long-file job cannot block classroom captions.
+    this.liveWorker = new RetainedAsr({ python: this.python, worker: WORKER });
+    this.fileWorker = new RetainedAsr({ python: this.python, worker: WORKER });
   }
   run(args, emit, signal, timeoutMs = 300000) {
     return new Promise((resolve, reject) => {
@@ -64,6 +68,30 @@ export class AsrService {
       .catch(() => unavailable).then(value => { this.cached = { at: Date.now(), value }; return value; }).finally(() => { this.checking = null; });
     return this.checking;
   }
+  async warmupLive(signal) {
+    return this.liveWorker.request({ operation: 'warmup' }, () => {}, signal, 45000);
+  }
+  async live(req, language, signal) {
+    if (!['en', 'zh'].includes(language)) throw new BridgeError('BAD_INPUT', '只支持中文或英语录音。', 400);
+    if (this.closed) throw new BridgeError('ASR_OFFLINE', '本机语音服务已关闭。', 503);
+    if (this.liveWorker.pending || this.liveReceiving) throw new BridgeError('ASR_BUSY', '实时语音正在处理，请稍后重试。', 429);
+    this.liveReceiving = true;
+    try {
+      let size = 0; const chunks = [];
+      for await (const chunk of req) {
+        signal?.throwIfAborted(); size += chunk.length;
+        if (size > 12 * 16000 * 4) throw new BridgeError('TOO_LARGE', '实时语音单段最多 12 秒。', 413);
+        chunks.push(chunk);
+      }
+      if (size < 1600 || size % 4) throw new BridgeError('BAD_INPUT', '实时音频样本长度无效。', 400);
+      const pcm = Buffer.concat(chunks);
+      for (let i = 0; i < pcm.length; i += 4) {
+        const sample = pcm.readFloatLE(i);
+        if (!Number.isFinite(sample) || Math.abs(sample) > 1.05) throw new BridgeError('BAD_INPUT', '实时音频含无效样本。', 400);
+      }
+      return await this.liveWorker.request({ operation: 'live', language, pcm: pcm.toString('base64') }, () => {}, signal, 45000);
+    } finally { this.liveReceiving = false; }
+  }
   async transcribe(req, language, emit, signal) {
     if (this.closed) throw new BridgeError('ASR_OFFLINE', '本机转写服务已关闭。', 503);
     if (!['en', 'zh'].includes(language)) throw new BridgeError('BAD_INPUT', '只支持中文或英语录音。', 400);
@@ -88,7 +116,7 @@ export class AsrService {
       } finally { await file.close(); }
       if (!bytes) throw new BridgeError('BAD_INPUT', '音频文件为空。', 400);
       signal.throwIfAborted();
-      return await this.run(['--file', path, '--language', language], emit, signal);
+      return await this.fileWorker.request({ operation: 'file', path, language }, emit, signal, 300000);
     } finally {
       // Only a newly created processing copy is removed. Browser/vault originals are untouched.
       if (path) await unlink(path).catch(() => {});
@@ -96,5 +124,5 @@ export class AsrService {
       this.active = false; this.request = null;
     }
   }
-  close() { this.closed = true; this.request?.destroy(); for (const child of this.children) child.kill(); }
+  close() { this.closed = true; this.request?.destroy(); this.liveWorker.close(); this.fileWorker.close(); for (const child of this.children) child.kill(); }
 }

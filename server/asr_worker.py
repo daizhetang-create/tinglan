@@ -1,15 +1,28 @@
 """Local-only, bounded PCM transcription. Never downloads a model implicitly."""
 import argparse
+import base64
 import json
 import os
 import re
 import sys
 import time
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from asr_quality import quality_reason
 
 RATE = 16000
 CORE = 60 * RATE
 CONTEXT = 2 * RATE
 MAX_SAMPLES = 4 * 3600 * RATE
+_model = None
+
+
+def get_model():
+    global _model
+    if _model is None:
+        from faster_whisper import WhisperModel
+        _model = WhisperModel(cached_model(), device='cpu', compute_type='int8',
+            cpu_threads=min(4, os.cpu_count() or 2), num_workers=1, local_files_only=True)
+    return _model
 
 
 def emit(value):
@@ -110,26 +123,35 @@ def cached_model():
 def transcribe(path, language):
     import av
     import numpy as np
-    from faster_whisper import WhisperModel
-    model_path = cached_model()
     emit({'type': 'progress', 'message': '正在加载本机 Small 精校模型（不上传音频）'})
-    model = WhisperModel(model_path, device='cpu', compute_type='int8', cpu_threads=min(4, os.cpu_count() or 2), num_workers=1, local_files_only=True)
+    model = get_model()
     window = WindowBuffer(np)
     stitcher = WordStitcher()
     count = 0
+    rejected = 0
     last_end = 0.0
     began = time.monotonic()
 
     def process(item):
-        nonlocal count, last_end
+        nonlocal count, last_end, rejected
         audio, start, core_start, core_end, eof = item
         # At EOF the penultimate core may still have a tiny final core to follow.
         final = eof and core_end == window.end
         emit({'type': 'progress', 'processedMs': core_start/RATE*1000, 'message': '本机分窗精校 · %.0f–%.0f 秒' % (core_start/RATE, core_end/RATE)})
         segments, _ = model.transcribe(audio, language=language, beam_size=3, word_timestamps=True,
-            condition_on_previous_text=False, vad_filter=True, vad_parameters={'min_silence_duration_ms': 500})
+            condition_on_previous_text=False, temperature=(0.0, 0.2),
+            hallucination_silence_threshold=1.0, max_new_tokens=400,
+            vad_filter=True, vad_parameters={'min_silence_duration_ms': 400})
         words = []
         for segment in segments:
+            reason = quality_reason(segment.text)
+            if reason:
+                rejected += 1
+                emit({'type': 'quality-warning', 'reason': reason,
+                      'startMs': round((start/RATE + segment.start)*1000),
+                      'endMs': round((start/RATE + segment.end)*1000),
+                      'message': '一段异常识别已拦截，请结合原音频核对；未把乱码写入字幕。'})
+                continue
             for word in segment.words or []:
                 a, b = start/RATE + word.start, min(window.end/RATE, start/RATE + word.end)
                 if b > a and word.word.strip():
@@ -183,15 +205,84 @@ def transcribe(path, language):
         raise ValueError('没有识别到清晰语音；原音频保留，请核对音量和录音来源。')
     emit({'type': 'result', 'durationMs': round(window.end/RATE*1000), 'segments': count,
           'model': 'faster-whisper-small-int8', 'maxBufferedSamples': window.peak,
-          'boundaryWarnings': stitcher.uncertain, 'elapsedSeconds': round(time.monotonic()-began, 2)})
+          'boundaryWarnings': stitcher.uncertain, 'qualityWarnings': rejected,
+          'elapsedSeconds': round(time.monotonic()-began, 2)})
+
+
+def live_transcribe(encoded, language):
+    import numpy as np
+    raw = base64.b64decode(encoded, validate=True)
+    if len(raw) % 4 or not 1600 <= len(raw) <= 12 * RATE * 4:
+        raise ValueError('实时语音片段必须为 0.025–12 秒、16kHz 单声道 Float32。')
+    audio = np.frombuffer(raw, dtype='<f4').copy()
+    if not np.isfinite(audio).all() or np.max(np.abs(audio)) > 1.05:
+        raise ValueError('实时音频含无效样本。')
+    began = time.monotonic()
+    # VAD inside the recognizer handles speech/noise; energy gate only excludes silence.
+    if np.sqrt(np.mean(audio * audio)) < 0.0015:
+        return {'text': '', 'chunks': [], 'quality': {'rejectedSegments': 0, 'reason': 'silence'}, 'elapsedMs': 0}
+    model = get_model()
+    segments, _ = model.transcribe(audio, language=language, beam_size=3,
+        temperature=(0.0, 0.2), condition_on_previous_text=False,
+        vad_filter=True, vad_parameters={'min_silence_duration_ms': 300, 'speech_pad_ms': 200},
+        word_timestamps=False, max_new_tokens=min(224, max(64, int(len(audio)/RATE*22))))
+    chunks, rejected = [], 0
+    duration = len(audio)/RATE
+    for segment in segments:
+        if quality_reason(segment.text):
+            rejected += 1
+            continue
+        a, b = max(0, segment.start), min(duration, segment.end)
+        if b > a:
+            chunks.append({'text': segment.text.strip(), 'timestamp': [a, b]})
+    return {'text': ' '.join(c['text'] for c in chunks), 'chunks': chunks,
+            'quality': {'rejectedSegments': rejected},
+            'elapsedMs': round((time.monotonic()-began)*1000)}
+
+
+def serve():
+    """Private stdio only. Parent owns paths; browser can never submit worker commands."""
+    global emit
+    output = emit
+    for line in sys.stdin:
+        request_id = None
+        try:
+            if len(line) > 1100000:
+                raise ValueError('实时音频请求过大。')
+            request = json.loads(line)
+            request_id = request['id']
+            language = request.get('language', 'en')
+            if language not in ('en', 'zh'):
+                raise ValueError('只支持中文或英语录音。')
+            emit = lambda event: output({**event, 'id': request_id})
+            operation = request.get('operation')
+            if operation == 'warmup':
+                get_model()
+                emit({'type': 'result', 'available': True, 'liveSupported': True})
+            elif operation == 'live':
+                result = live_transcribe(request['pcm'], language)
+                emit({'type': 'result', **result, 'engine': 'faster-whisper-small-int8'})
+            elif operation == 'file':
+                transcribe(request['path'], language)
+            else:
+                raise ValueError('不支持的本机语音操作。')
+        except Exception as error:
+            output({'id': request_id, 'type': 'error', 'code': 'ASR_FAILED',
+                    'message': str(error) if isinstance(error, ValueError) else '本机语音处理未完成，原音频保留，请重试。'})
+        finally:
+            emit = output
 
 
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--probe', action='store_true')
+    parser.add_argument('--serve', action='store_true')
     parser.add_argument('--file')
     parser.add_argument('--language', choices=['en', 'zh'], default='en')
     args = parser.parse_args()
+    if args.serve:
+        serve()
+        return
     if args.probe:
         try:
             import av
@@ -200,7 +291,7 @@ def main():
             cached_model()
             if 'int8' not in ctranslate2.get_supported_compute_types('cpu'):
                 raise RuntimeError('int8 unavailable')
-            emit({'available': True, 'model': 'faster-whisper-small-int8', 'localOnly': True, 'windowSeconds': 60})
+            emit({'available': True, 'liveSupported': True, 'model': 'faster-whisper-small-int8', 'localOnly': True, 'windowSeconds': 60})
         except Exception:
             emit({'available': False, 'message': '本机精校需要 Python、faster-whisper 和已缓存的 Small 模型，请运行“配置本机转写”。短录音仍可使用浏览器精校。'})
         return

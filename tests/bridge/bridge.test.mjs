@@ -64,7 +64,7 @@ test('parallel first requests wait for initialization instead of racing handshak
 });
 test('output citation timestamps come from source, fabricated sources are rejected', () => {
   const { sources } = normalizeInput(fixture);
-  const value = { overview: '测试', answer: '', items: [{ category: 'assignment', text: '报告', sourceRecordingId: 'test-class', sourceSegmentId: 'segment-2', atMs: 999999, due: 'next Friday at 5 pm' }] };
+  const value = { overview: '测试', answer: '', items: [{ category: 'assignment', text: '报告', evidenceQuote: 'Submit a 500-word report', sourceRecordingId: 'test-class', sourceSegmentId: 'segment-2', atMs: 999999, due: 'next Friday at 5 pm' }] };
   assert.equal(validateNotes(JSON.stringify(value), sources, 'test-thread').items[0].atMs, 12000);
   value.items[0].sourceSegmentId = 'made-up'; assert.throws(() => validateNotes(JSON.stringify(value), sources, 'test-thread'), /引用/);
 });

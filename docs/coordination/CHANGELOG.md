@@ -26,3 +26,5 @@ This file is updated only by the integration workflow. Feature branches publish 
 - 2026-09-08 04:56 integrated LEARN-001 from 006d45ad77a8b19363e18705d851b98c7110d9c5: Verified real image/audio study library, source-grounded DDL retrieval, local vault preservation, 15 Node and 74 browser regression checks; hosted AI and unspecified platforms remain explicit limitations
 
 - 2026-09-08 08:51 integrated HARDEN-001 from 8e6078923b3410dc586e8f1be68fa2fc077c8fae: Verified 0.5: durable recording recovery, bounded Small ASR, actual Chinese/English Codex workflow, portable launch and hosted no-upload guards; documented limits
+
+- 2026-09-12 15:30 integrated ENGINE-001 from ead349ade81e8ba7a8610869504810f380f62df3: Retained native live/file ASR, bounded quality gates, grounded notes citations, and real synthetic latency evidence; frontend integration remains next.
