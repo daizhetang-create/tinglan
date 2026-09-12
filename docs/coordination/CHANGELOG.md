@@ -28,3 +28,5 @@ This file is updated only by the integration workflow. Feature branches publish 
 - 2026-09-08 08:51 integrated HARDEN-001 from 8e6078923b3410dc586e8f1be68fa2fc077c8fae: Verified 0.5: durable recording recovery, bounded Small ASR, actual Chinese/English Codex workflow, portable launch and hosted no-upload guards; documented limits
 
 - 2026-09-12 15:30 integrated ENGINE-001 from ead349ade81e8ba7a8610869504810f380f62df3: Retained native live/file ASR, bounded quality gates, grounded notes citations, and real synthetic latency evidence; frontend integration remains next.
+
+- 2026-09-12 15:49 integrated ASR-002 from 8002a9e52d6cf305a47eccbbd5987e42baf2d910: Connect live captions to retained native Small API with bounded browser fallback

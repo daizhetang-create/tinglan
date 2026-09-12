@@ -1,5 +1,6 @@
 /// <reference lib="webworker" />
 import { env, pipeline } from '@huggingface/transformers';
+import { sanitizeAsrResult } from '../features/recorder/asrQuality';
 
 env.allowLocalModels = false;
 env.useBrowserCache = true;
@@ -99,9 +100,14 @@ self.onmessage = async (event: MessageEvent<TranscriptionRequest>) => {
       label: isEnglish(sourceLanguage) ? '兼容模式正在转写英文' : '兼容模式正在转写中文',
     });
     const generationOptions: Record<string, unknown> = {
-      chunk_length_s: 20,
-      stride_length_s: 4,
+      // Live chunks are already bounded to 4–8 s. Keep generation bounded and
+      // disable cross-chunk conditioning, which is a common source of loops.
+      chunk_length_s: 8,
+      stride_length_s: 1,
       return_timestamps: true,
+      max_new_tokens: 256,
+      temperature: 0,
+      condition_on_previous_text: false,
     };
     // Transformers.js rejects language/task hints for Whisper `.en` models.
     // Multilingual checkpoints need both hints for deterministic Chinese ASR.
@@ -116,10 +122,14 @@ self.onmessage = async (event: MessageEvent<TranscriptionRequest>) => {
       event.data.audio,
       generationOptions,
     );
-    if (!result.text?.trim() && !result.chunks?.some((chunk) => chunk.text.trim())) {
+    const sanitized = sanitizeAsrResult(result);
+    if (!sanitized.text && !sanitized.chunks.length) {
+      if (sanitized.quality?.rejectedSegments) {
+        throw new Error(sanitized.quality.reason ?? '识别结果疑似重复幻觉，已丢弃异常字幕');
+      }
       throw new Error('未识别到清晰语音，录音已保留，请检查音量或重新转写');
     }
-    self.postMessage({ type: 'result', requestId: event.data.requestId, result });
+    self.postMessage({ type: 'result', requestId: event.data.requestId, result: sanitized });
   } catch (error) {
     const detail = error instanceof Error ? error.message : '精确转写失败';
     self.postMessage({
