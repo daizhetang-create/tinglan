@@ -686,7 +686,9 @@ function App() {
             try { await abortable(Promise.resolve(liveRef.current?.stop()),finalizeController.signal); } catch { liveFailedRef.current=true; }
             finalizeController.signal.throwIfAborted();
             await abortable(Promise.allSettled([...liveTranslationsRef.current]),finalizeController.signal);
-            await abortable(Promise.resolve(liveAiPromiseRef.current),finalizeController.signal);
+            // Do not wait for a live Codex request. Live key messages are local;
+            // the final pass is the single grounded AI summary.
+            aiAbortRef.current?.abort();
             finalizeController.signal.throwIfAborted();
             liveRef.current?.dispose();liveRef.current=null;
             const latest=activeRef.current?.id===recordingId?activeRef.current:completed;
@@ -857,7 +859,7 @@ function App() {
       const result=await generateCodexNotes(sources,prompt,text=>setAiStream(value=>(value+text).slice(-12000)),controller.signal);
       const sections:NonNullable<RecordingSession['classBrief']>['sections']={concepts:[],takeaways:[],assignments:[],examReading:[],followUps:[]};
       const mapping={concept:'concepts',emphasis:'takeaways',assignment:'assignments',exam:'examReading',question:'followUps',admin:'followUps'} as const;
-      result.items.forEach((item,index)=>sections[mapping[item.category]].push({id:'ai-'+index+'-'+item.sourceSegmentId,text:item.text,atMs:item.atMs,sourceSegmentId:item.sourceSegmentId,sourceRecordingId:item.sourceRecordingId,due:item.due}));
+      result.items.forEach((item,index)=>sections[mapping[item.category]].push({id:'ai-'+index+'-'+item.sourceSegmentId,text:item.text,atMs:item.atMs,sourceSegmentId:item.sourceSegmentId,sourceRecordingId:item.sourceRecordingId,due:item.due,evidenceQuote:item.evidenceQuote}));
       const latest=activeRef.current?.id===recording.id?activeRef.current:(recordsRef.current.find(item=>item.id===recording.id)??recording);
       // A focused question must not replace the saved, comprehensive classroom summary.
       if(answerOnly){
@@ -922,8 +924,10 @@ function App() {
         }
       }
       controller.signal.throwIfAborted();
-      const local=enrichWithFocusNotes(working,settings.summaryTemplate,true);
-      working=await saveStage({keyMessages:local.keyMessages,classBrief:local.classBrief,analysisStatus:settings.aiProvider==='codex'?'summarizing':'ready',analysisError:translationError||undefined});
+      const local=enrichWithFocusNotes(working,settings.summaryTemplate,settings.aiProvider!=='codex');
+      // Local rules may power real-time Key Messages, but are not presented as
+      // a completed AI summary while Codex is still running.
+      working=await saveStage({keyMessages:local.keyMessages,classBrief:settings.aiProvider==='codex'?working.classBrief:local.classBrief,analysisStatus:settings.aiProvider==='codex'?'summarizing':'ready',analysisError:translationError||undefined});
       controller.signal.throwIfAborted();
       if(settings.aiProvider==='codex') {
         try {working=await generateNotes(working,working.batchId?'class':'recording',undefined,controller.signal);}
@@ -951,13 +955,9 @@ function App() {
     setRuntimeNotice(finished.aiError||finished.analysisError||finished.transcriptionWarning||'录音、文字和笔记已保存');
   };
 
-  useEffect(()=>{
-    if(active?.status!=='recording'||settings.aiProvider!=='codex'||!settings.autoKeyMessages||aiJobRef.current||!active.segments.length)return;
-    const chars=active.segments.reduce((sum,segment)=>sum+segment.source.length,0);
-    if(chars<80||Date.now()-liveAiAtRef.current<30_000)return;
-    liveAiAtRef.current=Date.now();
-    liveAiPromiseRef.current=generateNotes(active,'recording','根据目前已经出现的课堂原话，更新实时要点。未明确的日期标为待确认。').catch(()=>undefined).finally(()=>{liveAiPromiseRef.current=null;});
-  },[active?.segments.length,active?.status,settings.aiProvider,settings.autoKeyMessages,generateNotes]);
+  // During capture, Key Messages come from local classification of the newest
+  // segments. Sending the full growing transcript every 30 seconds caused
+  // quadratic latency and occupied the user's Codex task line.
 
   const handleAudioImport = useCallback(async (files: File[]) => {
     if (studyBusyRef.current) { setToast('请先完成或取消学习资料处理'); return; }
@@ -1533,7 +1533,7 @@ function App() {
               <button className={inputSource === 'system' ? 'active' : ''} onClick={() => setInputSource('system')}><Icon name="monitor" /> 电脑声音</button>
             </div>
           )}
-          <span className="engine-label">实时 Tiny · {active.transcriptionEngine || '课后优先本机 Small 精校'}</span>
+          <span className="engine-label">实时本机 Small · {active.transcriptionEngine || '实时服务预热中，异常时回退浏览器字幕'}</span>
         </section>
 
         <div className="processing-actions" aria-label="音频处理">
@@ -1651,7 +1651,7 @@ function App() {
                   {briefSectionKeys.map((section) => (
                     <section className="brief-document-section" key={section}>
                       <h4>{BRIEF_SECTION_LABELS[section]} <b>{active.classBrief?.sections[section].length ?? 0}</b></h4>
-                      {active.classBrief?.sections[section].length ? <ul>{active.classBrief.sections[section].map((item) => <li key={item.id}><button onClick={() => seekSource(item.atMs,item.sourceRecordingId)}><time>{formatClock(item.atMs)}</time><span>{item.text}{item.due && <small className="due-date">截止 / 时间：{item.due}</small>}</span></button></li>)}</ul> : <p className="brief-empty">本次暂未识别到相关内容</p>}
+                      {active.classBrief?.sections[section].length ? <ul>{active.classBrief.sections[section].map((item) => <li key={item.id}><button onClick={() => seekSource(item.atMs,item.sourceRecordingId)}><time>{formatClock(item.atMs)}</time><span>{item.text}{item.due && <small className="due-date">截止 / 时间：{item.due}</small>}{item.evidenceQuote && <small className="evidence-quote">依据原话：“{item.evidenceQuote}”</small>}</span></button></li>)}</ul> : <p className="brief-empty">本次暂未识别到相关内容</p>}
                     </section>
                   ))}
                   <p className="brief-engine">{active.classBrief.engine==='codex'?'Codex · '+active.classBrief.model:'本地规则整理（非大模型）'} · {new Date(active.classBrief.generatedAt).toLocaleString('zh-CN')}</p>

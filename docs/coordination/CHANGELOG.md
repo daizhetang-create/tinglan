@@ -30,3 +30,5 @@ This file is updated only by the integration workflow. Feature branches publish 
 - 2026-09-12 15:30 integrated ENGINE-001 from ead349ade81e8ba7a8610869504810f380f62df3: Retained native live/file ASR, bounded quality gates, grounded notes citations, and real synthetic latency evidence; frontend integration remains next.
 
 - 2026-09-12 15:49 integrated ASR-002 from 8002a9e52d6cf305a47eccbbd5987e42baf2d910: Connect live captions to retained native Small API with bounded browser fallback
+
+- 2026-09-12 15:59 integrated NOTES-003 from ef0d6b6abc71859d8c076d2e55216ce76f11b46b: Connected native live ASR UI, removed quadratic live Codex submissions, withheld local fallback as final AI summary, and preserved grounded evidence quotes.

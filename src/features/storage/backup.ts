@@ -161,6 +161,7 @@ function validateRecording(value: unknown): Omit<RecordingSession, 'audioBlob'> 
         optionalString(item.sourceSegmentId, 'brief item.sourceSegmentId');
         optionalString(item.sourceRecordingId, 'brief item.sourceRecordingId');
         optionalString(item.due, 'brief item.due');
+        optionalString(item.evidenceQuote, 'brief item.evidenceQuote');
       }
     }
   }
