@@ -39,6 +39,7 @@ export interface BriefItem {
   text: string;
   atMs: number;
   sourceSegmentId?: string;
+  evidenceQuote?: string;
 }
 
 export interface ClassBrief {

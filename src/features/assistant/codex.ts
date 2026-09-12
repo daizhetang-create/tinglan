@@ -3,7 +3,7 @@ import { requireLocalBridge } from './localBridge';
 
 export interface CodexNotes {
   overview: string;
-  items: Array<{ category: 'concept' | 'emphasis' | 'assignment' | 'exam' | 'question' | 'admin'; text: string; sourceRecordingId: string; sourceSegmentId: string; atMs: number; due?: string }>;
+  items: Array<{ category: 'concept' | 'emphasis' | 'assignment' | 'exam' | 'question' | 'admin'; text: string; evidenceQuote?: string; sourceRecordingId: string; sourceSegmentId: string; atMs: number; due?: string }>;
   answer?: string; model: string; threadId: string; generatedAt: string;
 }
 export interface CodexStatus {

@@ -1,0 +1,27 @@
+{
+  "schemaVersion": 1,
+  "id": "NOTES-003",
+  "title": "Make live capture and grounded notes responsive and truthful",
+  "priority": "P0",
+  "status": "active",
+  "scope": "integration",
+  "recommendedBranch": "codex/notes-003",
+  "dependsOn": [],
+  "summary": "Connect the retained native ASR path to the real recorder, remove repeated Codex live submissions, keep local key messages useful, and show only grounded final notes with source evidence.",
+  "acceptanceCriteria": [
+    "Live recorder uses the local retained Small ASR endpoint when available and falls back once to browser captions without retry storms.",
+    "Recording stop does not wait for an in-flight live Codex request; the final summary is the single grounded Codex pass.",
+    "While recording, local Key Messages remain visible; a failed Codex request is not represented as a completed raw-text summary.",
+    "Final note items retain exact source evidence quotes and backup validation preserves them.",
+    "The transcript and notes UI labels the actual native/fallback path and surfaces source evidence.",
+    "npm run check and npm run build pass."
+  ],
+  "evidence": [
+    "npm ci, npm run check and npm run build pass",
+    "13 runtime/bridge tests pass, including bounded live queue, silence handling, translation disposal and grounded citation validation",
+    "real native live synthetic English and Chinese smoke passes: warmup about 4 seconds, 6-second requests about 2.5-3.4 seconds, silence pass",
+    "front-end no longer submits the growing full transcript to Codex every 30 seconds; stop cancels live AI and keeps one final grounded pass",
+    "Codex evidenceQuote is retained in brief items and validated in backup import"
+  ],
+  "updatedAt": "2026-09-12T07:59:00.000Z"
+}
