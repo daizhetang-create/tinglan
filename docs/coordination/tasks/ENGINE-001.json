@@ -1,0 +1,30 @@
+{
+  "schemaVersion": 1,
+  "id": "ENGINE-001",
+  "title": "Rebuild retained native speech engine and grounded notes quality gates",
+  "priority": "P0",
+  "status": "active",
+  "scope": "bridge",
+  "recommendedBranch": "codex/engine-001",
+  "dependsOn": [
+    "HARDEN-001"
+  ],
+  "description": "User halted open source and cloud publication on 2026-09-12 after runaway repeated transcript output. Rebuild local speech service with retained native model, bounded live PCM requests, safe quality rejection and source-grounded notes. ASR-002 independently owns browser runtime. Preserve expired dirty LEARN-002 worktree unchanged. No paid provider switch or public deployment.",
+  "acceptanceCriteria": [
+    "Native live inference reuses the loaded model and returns bounded timestamped results without Codex inference",
+    "Silence, noise, invalid PCM, repetitive output, cancellation, oversized input and worker failure have tested safe outcomes",
+    "Notes do not treat degenerate transcript as evidence and retain valid source citations",
+    "Actual Chinese and English fixture recognition and measured cold/warm latency are recorded; model parity claims require evidence",
+    "Build and bridge regressions pass; original recordings and dirty sibling worktrees are untouched"
+  ],
+  "evidence": [
+    "npm run check and npm run build pass in engine worktree",
+    "15 bridge Node tests pass, including retained ASR cancellation, stale-event isolation, HTTP PCM validation and grounded notes",
+    "3 Python ASR quality tests pass",
+    "real native synthetic English and Chinese live PCM smoke: warmup about 3 seconds, 6-second requests about 2-3 seconds, silence rejected without hallucinated text",
+    "real retained file ASR smoke: 30 bounded segments, 0 boundary warnings and 0 quality warnings; cancellation and malformed input gates pass",
+    "real Codex notes smoke authenticates ChatGPT subscription and validates exact source evidence, assignments and exam facts; measured response remains about 148 seconds and is not claimed as classroom-realtime"
+  ],
+  "updatedAt": "2026-09-12T07:15:00.000Z",
+  "resultSummary": "Native local ASR is retained and bounded, malformed/repetitive output is rejected, and Codex notes require grounded source quotes and literal deadlines. This is a verified backend candidate, not a claim of Qwen parity; frontend integration and incremental notes remain required."
+}

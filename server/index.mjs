@@ -18,9 +18,20 @@ export function createBridge({ service = new NotesService(), vault = new VaultSe
     if (req.method === 'OPTIONS') { res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS'); res.setHeader('Access-Control-Allow-Headers', 'Content-Type, X-Tinglan-Client, X-Tinglan-Filename'); return res.writeHead(204).end(); }
     const path = req.url?.split('?')[0];
     if (req.method === 'GET' && path === '/api/health') return json(200, { ok: true, service: 'tinglan-codex-bridge', model: MODEL });
-    if (req.method === 'POST' && (!req.headers.origin || req.headers['x-tinglan-client'] !== '1' || !req.headers['content-type']?.startsWith(['/api/library/upload', '/api/asr/transcribe'].includes(path) ? 'application/octet-stream' : 'application/json'))) return json(403, { code: 'FORBIDDEN_REQUEST', message: '请求未通过本机来源校验。' });
+    if (req.method === 'POST' && (!req.headers.origin || req.headers['x-tinglan-client'] !== '1' || !req.headers['content-type']?.startsWith(['/api/library/upload', '/api/asr/transcribe', '/api/asr/live'].includes(path) ? 'application/octet-stream' : 'application/json'))) return json(403, { code: 'FORBIDDEN_REQUEST', message: '请求未通过本机来源校验。' });
     try {
       if (req.method === 'GET' && path === '/api/asr/status') return json(200, await asr.status());
+      if (req.method === 'POST' && ['/api/asr/live', '/api/asr/warmup'].includes(path)) {
+        const controller = new AbortController();
+        res.once('close', () => { if (!res.writableEnded) controller.abort(); });
+        req.once('aborted', () => controller.abort());
+        if (path === '/api/asr/warmup') {
+          // Empty JSON body only; never interpret browser-supplied worker commands or paths.
+          let size = 0; for await (const chunk of req) { size += chunk.length; if (size > 32) throw new BridgeError('BAD_INPUT', '预热请求无效。', 400); }
+          return json(200, await asr.warmupLive(controller.signal));
+        }
+        return json(200, await asr.live(req, new URL(req.url, 'http://localhost').searchParams.get('language'), controller.signal));
+      }
       if (req.method === 'POST' && path === '/api/asr/transcribe') {
         const controller = new AbortController();
         res.once('close', () => { if (!res.writableEnded) controller.abort(); });
