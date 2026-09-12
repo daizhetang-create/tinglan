@@ -1,5 +1,6 @@
 import type { ModelProgress, TranscriptSegment } from '../../types';
 import captureModuleUrl from './pcm-capture.worklet.js?url';
+import { sanitizeAsrResult } from './asrQuality';
 
 interface LiveOptions {
   sourceLanguage: string;
@@ -10,12 +11,15 @@ interface LiveOptions {
 }
 
 interface AudioChunk { audio: Float32Array; startMs: number; durationMs: number }
-interface AsrResult { text?: string; chunks?: Array<{ text: string; timestamp: [number, number | null] }> }
+interface AsrResult { text?: string; chunks?: Array<{ text: string; timestamp: [number, number | null] }>; quality?: { rejectedSegments?: number; reason?: string } }
 interface Reply { type: string; requestId?: string; message?: string; label?: string; progress?: number; result?: AsrResult }
 
 const MAX_QUEUED_CHUNKS = 3;
-const MIN_CHUNK_SECONDS = 8;
-const MAX_CHUNK_SECONDS = 12;
+// Four seconds gives a useful first caption after the model is warm; eight
+// seconds bounds CPU work while retaining enough context for lecture phrases.
+// A quiet boundary is preferred, but stop() always flushes the remaining tail.
+const MIN_CHUNK_SECONDS = 4;
+const MAX_CHUNK_SECONDS = 8;
 
 /** Capture/inference are independent of MediaRecorder: this class never stops input tracks. */
 export class LiveTranscriber {
@@ -39,6 +43,7 @@ export class LiveTranscriber {
   private stopPromise?: Promise<void>;
   private onFlushed?: () => void;
   private skippedChunks = 0;
+  private rejectedSegments = 0;
   private peakQueuedChunks = 0;
 
   constructor(options: LiveOptions) { this.options = options; }
@@ -141,7 +146,7 @@ export class LiveTranscriber {
     this.parts.push(samples);
     this.partSamples += samples.length;
     const seconds = this.partSamples / this.sampleRate;
-    // Prefer a quiet boundary after 8 seconds; force a bound at 12 seconds.
+    // Prefer a quiet boundary after four seconds; force a bound at eight.
     const rms = Math.sqrt(samples.reduce((sum, value) => sum + value * value, 0) / samples.length);
     if (seconds >= MAX_CHUNK_SECONDS || (seconds >= MIN_CHUNK_SECONDS && rms < 0.004)) this.flushChunk();
   }
@@ -186,8 +191,15 @@ export class LiveTranscriber {
       try {
         const result = await this.infer(chunk.audio);
         if (this.disposed) return;
-        const rawChunks = result.chunks?.filter((item) => item.text?.trim()) ?? [];
-        if (!rawChunks.length && result.text?.trim()) rawChunks.push({ text: result.text, timestamp: [0, chunk.durationMs / 1000] });
+        // Sanitize again at the controller boundary. This protects the UI if a
+        // worker is replaced or an older cached worker returns raw hypotheses.
+        const sanitized = sanitizeAsrResult(result);
+        this.rejectedSegments += sanitized.quality?.rejectedSegments ?? 0;
+        const rawChunks = sanitized.chunks.filter((item) => item.text?.trim());
+        if (!rawChunks.length && sanitized.text) rawChunks.push({ text: sanitized.text, timestamp: [0, chunk.durationMs / 1000] });
+        if (!rawChunks.length && sanitized.quality?.rejectedSegments) {
+          this.options.onError(`${sanitized.quality.reason ?? '检测到异常重复字幕，已丢弃'}；完整录音保留，结束后可补转写。`);
+        }
         const segments = rawChunks.map((item): TranscriptSegment => ({
           id: crypto.randomUUID(),
           startMs: Math.round(chunk.startMs + Math.max(0, Math.min(chunk.durationMs, (item.timestamp?.[0] ?? 0) * 1000))),
@@ -195,7 +207,7 @@ export class LiveTranscriber {
           speaker: '课堂讲者', source: item.text.trim(), translation: '',
         }));
         if (segments.length) this.options.onSegments(segments);
-        this.options.onProgress({ state: this.closing ? 'working' : 'ready', label: this.queue.length ? `实时字幕处理中 · 剩余 ${this.queue.length} 段` : '本地实时字幕已就绪 · 每 8–12 秒更新' });
+        this.options.onProgress({ state: this.closing ? 'working' : 'ready', label: this.queue.length ? `实时字幕处理中 · 剩余 ${this.queue.length} 段` : '本地实时字幕已就绪 · 每 4–8 秒更新' });
       } catch (error) {
         if (!this.disposed) this.options.onError(`${error instanceof Error ? error.message : '实时转写失败'}；完整录音保留，结束后可补转写。`);
       }

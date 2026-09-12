@@ -1,0 +1,28 @@
+{
+  "schemaVersion": 1,
+  "id": "ASR-002",
+  "title": "Harden browser live transcription quality and latency",
+  "priority": "P0",
+  "status": "active",
+  "scope": "runtime",
+  "recommendedBranch": "codex/asr-002",
+  "dependsOn": [
+    "LIVE-001",
+    "CORE-001"
+  ],
+  "summary": "Reject degenerate Whisper output, preserve truthful silence/errors, and tune bounded browser chunks for responsive live captions without dropping short speech.",
+  "acceptanceCriteria": [
+    "Known repetitive or degenerate hypotheses are rejected as quality failures instead of shown as transcript text.",
+    "Legitimate short repetitions remain valid transcript output.",
+    "Browser live worker generation stays bounded and cancellation-safe.",
+    "No chunk scheduling change silently skips short utterances or causes unbounded queue growth.",
+    "npm run check and npm run build pass, plus focused runtime tests pass."
+  ],
+  "evidence": [
+    "node --test tests/runtime/asr-quality.test.mjs tests/runtime/live-controller.test.mjs: 7/7 pass (repetitive CJK rejection, legitimate repetition retention, bounded queue, silence, translation disposal).",
+    "npm run check: pass",
+    "npm run build: pass (Vite 42 modules)."
+  ],
+  "updatedAt": "2026-09-12T07:05:00.000Z",
+  "resultSummary": "Browser live transcription now uses bounded 4–8 second chunks, Whisper generation bounds, and conservative output sanitization that rejects repeated hallucinations without inventing replacement text."
+}
