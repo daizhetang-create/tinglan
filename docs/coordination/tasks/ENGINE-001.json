@@ -3,7 +3,7 @@
   "id": "ENGINE-001",
   "title": "Rebuild retained native speech engine and grounded notes quality gates",
   "priority": "P0",
-  "status": "active",
+  "status": "ready",
   "scope": "bridge",
   "recommendedBranch": "codex/engine-001",
   "dependsOn": [
@@ -23,8 +23,31 @@
     "3 Python ASR quality tests pass",
     "real native synthetic English and Chinese live PCM smoke: warmup about 3 seconds, 6-second requests about 2-3 seconds, silence rejected without hallucinated text",
     "real retained file ASR smoke: 30 bounded segments, 0 boundary warnings and 0 quality warnings; cancellation and malformed input gates pass",
-    "real Codex notes smoke authenticates ChatGPT subscription and validates exact source evidence, assignments and exam facts; measured response remains about 148 seconds and is not claimed as classroom-realtime"
+    "real Codex notes smoke authenticates ChatGPT subscription and validates exact source evidence, assignments and exam facts; measured response remains about 148 seconds and is not claimed as classroom-realtime",
+    "",
+    "> lectureflow-local@0.5.0 check",
+    "> tsc -b --pretty false",
+    "",
+    "",
+    "> lectureflow-local@0.5.0 build",
+    "> tsc -b && vite build && node scripts/stamp-build.mjs",
+    "",
+    "vite v8.0.13 building client environment for production...",
+    "\u001b[2K",
+    "transforming...✓ 41 modules transformed.",
+    "rendering chunks...",
+    "computing gzip size...",
+    "dist/index.html                                                 0.78 kB │ gzip:     0.51 kB",
+    "dist/assets/translation.worker-DBk18nBN.js                    517.46 kB",
+    "dist/assets/transcription.worker-66MuyZzo.js                  518.99 kB",
+    "dist/assets/ort-wasm-simd-threaded.asyncify-DMmc6YqF.wasm  23,567.05 kB │ gzip: 5,824.05 kB",
+    "dist/assets/index-DthOUcNK.css                                117.05 kB │ gzip:    24.50 kB",
+    "dist/assets/index-Df5NFJwu.js                                 362.23 kB │ gzip:   112.31 kB",
+    "",
+    "✓ built in 1.33s",
+    "npm run check: pass",
+    "npm run build: pass"
   ],
-  "updatedAt": "2026-09-12T07:15:00.000Z",
-  "resultSummary": "Native local ASR is retained and bounded, malformed/repetitive output is rejected, and Codex notes require grounded source quotes and literal deadlines. This is a verified backend candidate, not a claim of Qwen parity; frontend integration and incremental notes remain required."
+  "updatedAt": "2026-09-12T07:29:46.5341863Z",
+  "resultSummary": "Retained native live/file ASR, bounded quality gates, grounded notes citations, and real synthetic latency evidence; frontend integration remains next."
 }
