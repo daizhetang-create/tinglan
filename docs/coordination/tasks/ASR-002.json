@@ -3,7 +3,7 @@
   "id": "ASR-002",
   "title": "Harden browser live transcription quality and latency",
   "priority": "P0",
-  "status": "active",
+  "status": "ready",
   "scope": "runtime",
   "recommendedBranch": "codex/asr-002",
   "dependsOn": [
@@ -21,8 +21,31 @@
   "evidence": [
     "node --test tests/runtime/asr-quality.test.mjs tests/runtime/live-controller.test.mjs: 7/7 pass (repetitive CJK rejection, legitimate repetition retention, bounded queue, silence, translation disposal).",
     "npm run check: pass",
-    "npm run build: pass (Vite 42 modules)."
+    "npm run build: pass (Vite 42 modules).",
+    "",
+    "> lectureflow-local@0.5.0 check",
+    "> tsc -b --pretty false",
+    "",
+    "",
+    "> lectureflow-local@0.5.0 build",
+    "> tsc -b && vite build && node scripts/stamp-build.mjs",
+    "",
+    "vite v8.0.13 building client environment for production...",
+    "\u001b[2K",
+    "transforming...✓ 42 modules transformed.",
+    "rendering chunks...",
+    "computing gzip size...",
+    "dist/index.html                                                 0.78 kB │ gzip:     0.51 kB",
+    "dist/assets/translation.worker-DBk18nBN.js                    517.46 kB",
+    "dist/assets/transcription.worker-DI1jvI4q.js                  520.05 kB",
+    "dist/assets/ort-wasm-simd-threaded.asyncify-DMmc6YqF.wasm  23,567.05 kB │ gzip: 5,824.05 kB",
+    "dist/assets/index-DthOUcNK.css                                117.05 kB │ gzip:    24.50 kB",
+    "dist/assets/index-LS2pSbQ9.js                                 363.40 kB │ gzip:   112.76 kB",
+    "",
+    "✓ built in 1.04s",
+    "npm run check: pass",
+    "npm run build: pass"
   ],
-  "updatedAt": "2026-09-12T07:05:00.000Z",
-  "resultSummary": "Browser live transcription now uses bounded 4–8 second chunks, Whisper generation bounds, and conservative output sanitization that rejects repeated hallucinations without inventing replacement text."
+  "updatedAt": "2026-09-12T06:54:12.0541532Z",
+  "resultSummary": "Bound browser ASR to 4-8s chunks and reject repetitive hallucinated captions with focused tests"
 }
