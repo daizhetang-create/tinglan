@@ -44,8 +44,10 @@
     "",
     "✓ built in 1.04s",
     "npm run check: pass",
-    "npm run build: pass"
+    "npm run build: pass",
+    "Second pass: NativeLiveClient mock tests pass; probes /api/asr/status (8s cap), warms /api/asr/warmup (45s cap), posts raw 16k Float32 PCM to /api/asr/live, and preserves legitimate repetition.",
+    "LiveTranscriber uses native Small when local status and warmup succeed, aborts on dispose, and performs one bounded browser fallback on native failure; hosted pages never probe the local bridge."
   ],
-  "updatedAt": "2026-09-12T06:54:12.0541532Z",
-  "resultSummary": "Bound browser ASR to 4-8s chunks and reject repetitive hallucinated captions with focused tests"
+  "updatedAt": "2026-09-12T07:30:00.000Z",
+  "resultSummary": "Bound browser ASR to 4-8s chunks, reject repetitive hallucinated captions, and use retained local Small live API with one bounded browser fallback."
 }

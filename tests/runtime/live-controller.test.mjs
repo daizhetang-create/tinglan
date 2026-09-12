@@ -23,8 +23,14 @@ function loadClass(relativePath, exportName, overrides = {}) {
   const qualityContext = vm.createContext({ exports: qualityExports, console });
   const qualityCompiled = ts.transpileModule(qualitySource, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText;
   vm.runInContext(qualityCompiled, qualityContext);
+  const nativeStub = class { prepare() { return Promise.resolve(false); } };
   const context = vm.createContext({ exports, Worker: StalledWorker, crypto: webcrypto, setTimeout, clearTimeout, console,
-    require(request) { if (request === './asrQuality') return qualityExports; throw new Error(`Unexpected test import: ${request}`); }, ...overrides });
+    require(request) {
+      if (request === './asrQuality') return qualityExports;
+      if (request === './nativeLive') return { NativeLiveClient: nativeStub };
+      if (request === '../../features/assistant/localBridge') return { isLocalBridgeLocation: () => false };
+      throw new Error(`Unexpected test import: ${request}`);
+    }, ...overrides });
   const compiled = ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText;
   vm.runInContext(compiled, context);
   return { Class: exports[exportName], workers };

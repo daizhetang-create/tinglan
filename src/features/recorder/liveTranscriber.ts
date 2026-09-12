@@ -1,6 +1,8 @@
 import type { ModelProgress, TranscriptSegment } from '../../types';
 import captureModuleUrl from './pcm-capture.worklet.js?url';
 import { sanitizeAsrResult } from './asrQuality';
+import { NativeLiveClient } from './nativeLive';
+import { isLocalBridgeLocation } from '../../features/assistant/localBridge';
 
 interface LiveOptions {
   sourceLanguage: string;
@@ -45,6 +47,11 @@ export class LiveTranscriber {
   private skippedChunks = 0;
   private rejectedSegments = 0;
   private peakQueuedChunks = 0;
+  private nativeClient?: NativeLiveClient;
+  private nativeReady: Promise<boolean> = Promise.resolve(false);
+  private nativeAttempted = false;
+  private nativeDisabled = false;
+  private nativeAbort?: AbortController;
 
   constructor(options: LiveOptions) { this.options = options; }
 
@@ -83,6 +90,7 @@ export class LiveTranscriber {
       clearTimeout(readyTimer);
       if (this.disposed || this.closing) throw new Error('实时转写已取消');
       this.ensureWorker().postMessage({ type: 'warmup', model: this.options.model, sourceLanguage: this.options.sourceLanguage });
+      this.beginNativePreparation();
     } catch (error) {
       this.dispose();
       throw error;
@@ -115,6 +123,7 @@ export class LiveTranscriber {
     if (!this.disposed) this.options.onProgress({ state: 'ready', label: '实时转写队列处理完成' });
     this.worker?.terminate();
     this.worker = undefined;
+    this.nativeAbort?.abort();
   }
 
   dispose(): void {
@@ -129,6 +138,7 @@ export class LiveTranscriber {
     this.failPending(new Error('实时转写已关闭'));
     this.worker?.terminate();
     this.worker = undefined;
+    this.nativeAbort?.abort();
   }
 
   private disconnectCapture(): void {
@@ -243,7 +253,25 @@ export class LiveTranscriber {
     return this.worker;
   }
 
-  private infer(audio: Float32Array): Promise<AsrResult> {
+  private async infer(audio: Float32Array): Promise<AsrResult> {
+    if (this.nativeAttempted && !this.nativeDisabled) {
+      const nativeReady = await this.nativeReady;
+      if (nativeReady && this.nativeClient && !this.nativeDisabled) {
+        try {
+          return await this.nativeClient.transcribe(audio, this.options.sourceLanguage, this.nativeAbort?.signal);
+        } catch (error) {
+          if (this.disposed || this.closing) throw error;
+          // One bounded fallback is safer than repeatedly retrying a dead local
+          // process while the recording continues.
+          this.nativeDisabled = true;
+          this.options.onError(`本机实时转写暂不可用，已切换浏览器字幕：${error instanceof Error ? error.message : '服务未返回结果'}`);
+        }
+      }
+    }
+    return this.inferBrowser(audio);
+  }
+
+  private inferBrowser(audio: Float32Array): Promise<AsrResult> {
     const worker = this.ensureWorker();
     return new Promise((resolve, reject) => {
       const id = crypto.randomUUID();
@@ -254,6 +282,25 @@ export class LiveTranscriber {
       }, 180_000);
       this.pending = { id, resolve, reject, timer };
       worker.postMessage({ type: 'transcribe', requestId: id, audio, model: this.options.model, sourceLanguage: this.options.sourceLanguage }, [audio.buffer]);
+    });
+  }
+
+  private beginNativePreparation(): void {
+    this.nativeAttempted = true;
+    if (typeof window === 'undefined' || !isLocalBridgeLocation(window.location)) {
+      this.nativeDisabled = true;
+      return;
+    }
+    this.nativeClient = new NativeLiveClient();
+    this.nativeAbort = new AbortController();
+    this.nativeReady = this.nativeClient.prepare(this.nativeAbort.signal).then((ready) => {
+      if (ready && !this.disposed && !this.closing) this.options.onProgress({ state: 'ready', label: '本机 Small 实时转写已就绪 · 低延迟精确模式' });
+      return ready;
+    }).catch((error) => {
+      if (!this.disposed && !this.closing && !(error instanceof DOMException && error.name === 'AbortError')) {
+        this.options.onProgress({ state: 'ready', label: '本机精确引擎未就绪 · 使用浏览器实时字幕' });
+      }
+      return false;
     });
   }
 
