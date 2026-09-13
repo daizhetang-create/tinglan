@@ -1,5 +1,34 @@
 # 听澜 · Tinglan 0.5
 
+> 把课堂录音变成可回听、可引用、可复习的学习资料。
+
+听澜是本地优先的课堂录音、实时中英转写、翻译和证据化学习资料库。它使用浏览器处理录音和实时文字，本机 Small 模型做长音频精校，再通过用户自己的 ChatGPT/Codex 登录生成带来源的课堂纪要、作业和考试信息。
+
+## 在线页面与本机成品
+
+- 在线界面：[tinglan-study-library.blue-siren-8919.chatgpt.site](https://tinglan-study-library.blue-siren-8919.chatgpt.site)
+- 本机完整版：在项目目录双击 **启动听澜.cmd**，打开 `http://127.0.0.1:4318/`
+- 私有源码仓库：[daizhetang-create/tinglan](https://github.com/daizhetang-create/tinglan)
+
+在线页面只展示界面和浏览器本地资料能力，不包含这台电脑的 Codex 服务，也不会自动同步本机浏览器数据。需要使用本机订阅配额时，请使用 4318 本机版本。
+
+## 实际演示
+
+1. 启动听澜，确认顶部 Codex 连接状态。
+2. 选择英文→中文或中文课堂，创建新录音并授予麦克风权限。
+3. 录音过程中查看本地 Whisper Tiny 分块文字和英文中文对照。
+4. 停止录音后，系统先保存原始音频，再进行精确转写、翻译和分类纪要。
+5. 在 Class Brief 中查看核心概念、老师强调、作业/截止日期、考试/阅读和待跟进事项。
+6. 打开“学习资料库”，导入图片、文字或多段音频；每条结论都带原文来源和可回听时间。
+7. 在“问我的资料”中查询作业、DDL、考试安排或提交要求，并回到来源核对。
+
+## 当前状态
+
+2026-09-08 的 0.5 验收已经跑通真实录音、翻译、Codex 笔记、分段保护和本机 Small 精校。完整验收证据见 [HARDEN_ACCEPTANCE](docs/coordination/HARDEN_ACCEPTANCE.md) 和 [LEARN_ACCEPTANCE](docs/coordination/LEARN_ACCEPTANCE.md)。
+
+---
+# 听澜 · Tinglan 0.5
+
 本地课堂录音、实时中英转写、英文中文对照，以及使用 ChatGPT 订阅 Codex 配额的课堂助手。采用熟悉的双栏会议笔记工作流，不使用 Notta 私有代码或账号。
 
 **当前状态（2026-09-08）：真实录音、翻译与 Codex 笔记已跑通，新增分段保护与本机 Small 精校。** 新版证据和限制见 [0.5 验收](docs/coordination/HARDEN_ACCEPTANCE.md)，图文/音频资料库证据见 [学习库验收](docs/coordination/LEARN_ACCEPTANCE.md)，当前协同状态见 [PROJECT_STATUS](docs/coordination/PROJECT_STATUS.md)。不把“构建成功”视为所有课堂场景已验证。
