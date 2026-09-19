@@ -34,3 +34,5 @@ This file is updated only by the integration workflow. Feature branches publish 
 - 2026-09-12 15:59 integrated NOTES-003 from ef0d6b6abc71859d8c076d2e55216ce76f11b46b: Connected native live ASR UI, removed quadratic live Codex submissions, withheld local fallback as final AI summary, and preserved grounded evidence quotes.
 
 - 2026-09-19 19:48 integrated UI-001 from d1a18822acda6c76147539d07d5184dfada0bfd1: Polished Tinglan visual system with field-notes palette, responsive home cards, branded loading state, and reduced-motion guards; check/build passed.
+
+- 2026-09-19 23:41 integrated DOCS-001 from b25a86b8b8be518828a06254ba3724053f88fc16: Align public README wording with the repository's public visibility while preserving local-first privacy boundaries.

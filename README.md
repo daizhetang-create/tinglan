@@ -8,7 +8,7 @@
 
 - 在线界面：[tinglan-study-library.blue-siren-8919.chatgpt.site](https://tinglan-study-library.blue-siren-8919.chatgpt.site)
 - 本机完整版：在项目目录双击 **启动听澜.cmd**，打开 `http://127.0.0.1:4318/`
-- 私有源码仓库：[daizhetang-create/tinglan](https://github.com/daizhetang-create/tinglan)
+- 公开源码仓库：[daizhetang-create/tinglan](https://github.com/daizhetang-create/tinglan)
 
 在线页面只展示界面和浏览器本地资料能力，不包含这台电脑的 Codex 服务，也不会自动同步本机浏览器数据。需要使用本机订阅配额时，请使用 4318 本机版本。
 
@@ -91,7 +91,7 @@ npm start
 
 ## 在线页面与本机完整版
 
-私有源码仓库：[GitHub](https://github.com/daizhetang-create/tinglan)。本机完整版始终使用上面的 4318 地址。在线托管版本只是相同界面与设备本地资料功能，**不包含这台电脑的 Codex 服务，也不自动同步浏览器数据**；不能用一个静态网址就远程消耗本机订阅配额。在线界面显著提示这个边界并提供打开本机完整版的入口。
+公开源码仓库：[GitHub](https://github.com/daizhetang-create/tinglan)。本机完整版始终使用上面的 4318 地址。在线托管版本只是相同界面与设备本地资料功能，**不包含这台电脑的 Codex 服务，也不自动同步浏览器数据**；不能用一个静态网址就远程消耗本机订阅配额。在线界面显著提示这个边界并提供打开本机完整版的入口。
 
 托管页面在发送请求前拦截需要本机服务的音频、图像、文字和归档请求。原件仍可留在当前浏览器；要使用 Codex 请在本机完整版重新导入，两个地址不会自动共享资料。
 
