@@ -3,7 +3,7 @@
   "id": "UI-001",
   "title": "Raise the Notta-inspired UI to product quality",
   "priority": "P1",
-  "status": "planned",
+  "status": "integrated",
   "scope": "ui",
   "recommendedBranch": "codex/ui-001",
   "dependsOn": [],
@@ -16,6 +16,32 @@
     "Visual regression screenshots cover the dashboard, recording, transcript, AI notes, errors, and batch upload.",
     "npm run check and npm run build pass."
   ],
-  "evidence": [],
-  "updatedAt": "2026-09-03T00:00:00+08:00"
+  "evidence": [
+    "",
+    "> lectureflow-local@0.5.0 check",
+    "> tsc -b --pretty false",
+    "",
+    "",
+    "> lectureflow-local@0.5.0 build",
+    "> tsc -b && vite build && node scripts/stamp-build.mjs",
+    "",
+    "vite v8.0.13 building client environment for production...",
+    "\u001b[2K",
+    "transforming...✓ 43 modules transformed.",
+    "rendering chunks...",
+    "computing gzip size...",
+    "dist/index.html                                                 0.78 kB │ gzip:     0.52 kB",
+    "dist/assets/translation.worker-DBk18nBN.js                    517.46 kB",
+    "dist/assets/transcription.worker-DI1jvI4q.js                  520.05 kB",
+    "dist/assets/ort-wasm-simd-threaded.asyncify-DMmc6YqF.wasm  23,567.05 kB │ gzip: 5,824.05 kB",
+    "dist/assets/index-DJWHQNt3.css                                121.90 kB │ gzip:    25.68 kB",
+    "dist/assets/index-Bdc7GWBl.js                                 365.93 kB │ gzip:   113.38 kB",
+    "",
+    "✓ built in 912ms",
+    "npm run check: pass",
+    "npm run build: pass",
+    "integrated ready SHA d1a18822acda6c76147539d07d5184dfada0bfd1"
+  ],
+  "updatedAt": "2026-09-19T11:48:20.1743301Z",
+  "resultSummary": "Polished Tinglan visual system with field-notes palette, responsive home cards, branded loading state, and reduced-motion guards; check/build passed."
 }

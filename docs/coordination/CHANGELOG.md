@@ -32,3 +32,5 @@ This file is updated only by the integration workflow. Feature branches publish 
 - 2026-09-12 15:49 integrated ASR-002 from 8002a9e52d6cf305a47eccbbd5987e42baf2d910: Connect live captions to retained native Small API with bounded browser fallback
 
 - 2026-09-12 15:59 integrated NOTES-003 from ef0d6b6abc71859d8c076d2e55216ce76f11b46b: Connected native live ASR UI, removed quadratic live Codex submissions, withheld local fallback as final AI summary, and preserved grounded evidence quotes.
+
+- 2026-09-19 19:48 integrated UI-001 from d1a18822acda6c76147539d07d5184dfada0bfd1: Polished Tinglan visual system with field-notes palette, responsive home cards, branded loading state, and reduced-motion guards; check/build passed.
