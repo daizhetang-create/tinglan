@@ -1,0 +1,21 @@
+{
+  "schemaVersion": 1,
+  "id": "DOCS-001",
+  "title": "Align public README with Tinglan repository visibility",
+  "priority": "P2",
+  "status": "active",
+  "scope": "integration",
+  "recommendedBranch": "codex/docs-001",
+  "dependsOn": [
+    "UI-001"
+  ],
+  "summary": "Remove stale private-repository wording from the public README while preserving the documented privacy and local-first boundaries.",
+  "acceptanceCriteria": [
+    "Public README consistently describes the GitHub repository as public/open source without implying private source access.",
+    "The README keeps accurate boundaries for the hosted UI, local Codex bridge, raw recordings, and personal data.",
+    "npm run check and npm run build pass."
+  ],
+  "evidence": [],
+  "updatedAt": "2026-09-19T15:39:18.1179337Z",
+  "resultSummary": ""
+}
