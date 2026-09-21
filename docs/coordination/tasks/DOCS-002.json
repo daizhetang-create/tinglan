@@ -1,0 +1,21 @@
+{
+  "schemaVersion": 1,
+  "id": "DOCS-002",
+  "title": "Use the correct public Chinese product name",
+  "priority": "P2",
+  "status": "active",
+  "scope": "integration",
+  "recommendedBranch": "codex/docs-002",
+  "dependsOn": [
+    "DOCS-001"
+  ],
+  "summary": "Present the product as 听澜 (Tinglan) in the public README without changing internal repository or task identifiers.",
+  "acceptanceCriteria": [
+    "The public README uses 听澜 as the Chinese product name and Tinglan only as the English name.",
+    "No unrelated product claims or internal coordination identifiers are changed.",
+    "npm run check and npm run build pass."
+  ],
+  "evidence": [],
+  "updatedAt": "2026-09-21T02:00:14.4625432Z",
+  "resultSummary": ""
+}

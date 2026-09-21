@@ -1,4 +1,4 @@
-# 听澜 · Tinglan 0.5
+# 听澜 (Tinglan) 0.5
 
 > 把课堂录音变成可回听、可引用、可复习的学习资料。
 
@@ -27,7 +27,7 @@
 2026-09-08 的 0.5 验收已经跑通真实录音、翻译、Codex 笔记、分段保护和本机 Small 精校。完整验收证据见 [HARDEN_ACCEPTANCE](docs/coordination/HARDEN_ACCEPTANCE.md) 和 [LEARN_ACCEPTANCE](docs/coordination/LEARN_ACCEPTANCE.md)。
 
 ---
-# 听澜 · Tinglan 0.5
+# 听澜 (Tinglan) 0.5
 
 本地课堂录音、实时中英转写、英文中文对照，以及使用 ChatGPT 订阅 Codex 配额的课堂助手。采用熟悉的双栏会议笔记工作流，不使用 Notta 私有代码或账号。
 
